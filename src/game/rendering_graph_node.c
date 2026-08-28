@@ -2972,6 +2972,25 @@ s16 vr_get_tabletop_world_yaw(void) {
     return sVrTabletopWorldYaw;
 }
 
+bool vr_get_tabletop_mario_tracking_position(float outPosition[3]) {
+    if (outPosition == NULL || configVrCameraMode != VR_CAMERA_MODE_TABLETOP ||
+        !sVrTabletopAnchorValid || gMarioStates[0].marioObj == NULL) {
+        return false;
+    }
+
+    Mat4 tabletopTransform;
+    vr_build_tabletop_transform(tabletopTransform);
+    for (u32 worldAxis = 0; worldAxis < 3; worldAxis++) {
+        f32 transformed = tabletopTransform[3][worldAxis];
+        for (u32 modelAxis = 0; modelAxis < 3; modelAxis++) {
+            transformed += gMarioStates[0].pos[modelAxis] *
+                tabletopTransform[modelAxis][worldAxis];
+        }
+        outPosition[worldAxis] = transformed / VR_TABLETOP_UNITS_PER_METER;
+    }
+    return true;
+}
+
 static void vr_apply_tabletop_hand_space_correction(Mat4 matrix) {
     if (configVrCameraMode != VR_CAMERA_MODE_TABLETOP ||
         sCameraNode == NULL || !sVrTabletopAnchorValid) {

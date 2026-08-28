@@ -45,6 +45,9 @@ public final class QuestNativeActivity extends NativeActivity {
     private static final String TAG = "SM64CoopDXVR";
     private static final int OPEN_ROM_REQUEST = 6401;
     private static final int MICROPHONE_PERMISSION_REQUEST = 6402;
+    private static final int SPATIAL_DATA_PERMISSION_REQUEST = 6403;
+    private static final String USE_SCENE_PERMISSION =
+            "com.oculus.permission.USE_SCENE";
     private static final String ROM_NAME = "baserom.us.z64";
     private static final String SHARED_MOD_DIRECTORY = "/sdcard/SM64VR/mods";
     private static final String SHARED_DYNOS_PACK_DIRECTORY =
@@ -79,6 +82,13 @@ public final class QuestNativeActivity extends NativeActivity {
             requestPermissions(
                     new String[] { Manifest.permission.RECORD_AUDIO },
                     MICROPHONE_PERMISSION_REQUEST);
+        }
+        if (Build.VERSION.SDK_INT >= 23 &&
+                checkSelfPermission(USE_SCENE_PERMISSION) !=
+                    PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(
+                    new String[] { USE_SCENE_PERMISSION },
+                    SPATIAL_DATA_PERMISSION_REQUEST);
         }
         prepareSharedContentDirectories();
         checkForStandaloneUpdate();

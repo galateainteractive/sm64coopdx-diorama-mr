@@ -45,6 +45,21 @@ static void relative_rotation(const float current[4], float out[4]) {
     }
 }
 
+bool quest_vr_bridge_recentered_to_local(
+    const float recentered[3], float local[3]) {
+    if (recentered == NULL || local == NULL || !sReferenceValid) return false;
+    const float inverse_reference[4] = {
+        -sReferenceRotation[0], -sReferenceRotation[1],
+        -sReferenceRotation[2], sReferenceRotation[3],
+    };
+    float delta[3];
+    rotate_vector(inverse_reference, recentered, delta);
+    for (int axis = 0; axis < 3; ++axis) {
+        local[axis] = sReferencePosition[axis] + delta[axis];
+    }
+    return true;
+}
+
 void quest_vr_bridge_update_controller(
     uint32_t hand, const struct VrControllerState *state, bool available) {
     if (hand >= 2) return;

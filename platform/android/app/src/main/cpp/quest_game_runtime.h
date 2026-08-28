@@ -30,3 +30,4 @@ bool quest_game_is_ready(void);
 bool quest_game_tabletop_mr_requested(void);
 enum QuestPassthroughTheme quest_game_passthrough_theme(void);
 uint32_t quest_game_star_collection_serial(void);
+bool quest_game_tabletop_mario_tracking_position(float out_position[3]);

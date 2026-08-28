@@ -425,6 +425,10 @@ uint32_t quest_game_star_collection_serial(void) {
     return vr_get_star_collection_serial();
 }
 
+bool quest_game_tabletop_mario_tracking_position(float out_position[3]) {
+    return sReady && vr_get_tabletop_mario_tracking_position(out_position);
+}
+
 void quest_game_prepare_vr_frame(void) {
     if (!sReady || !sCompletedGameTick) return;
     const int64_t now = monotonic_ns();

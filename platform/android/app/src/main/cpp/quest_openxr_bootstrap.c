@@ -5,6 +5,7 @@
 #include <GLES3/gl31.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -26,6 +27,8 @@ extern void quest_vr_bridge_update_views(
     const float positions[2][3], const float rotations[2][4],
     const float fovs[2][4], const uint32_t widths[2],
     const uint32_t heights[2]);
+extern bool quest_vr_bridge_recentered_to_local(
+    const float recentered[3], float local[3]);
 
 #define LOG_TAG "SM64CoopDXVR"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
@@ -35,6 +38,16 @@ extern void quest_vr_bridge_update_views(
 #define QUEST_DEFAULT_RENDER_SCALE_PERCENT 80U
 #define QUEST_PASSTHROUGH_LUT_RESOLUTION 32U
 #define QUEST_STAR_PULSE_DURATION_NS 2200000000LL
+#define QUEST_ROOM_PULSE_DURATION_NS 2800000000LL
+#define QUEST_ROOM_MESH_MAX 4U
+#define QUEST_ROOM_QUERY_MAX_RESULTS 16U
+
+typedef struct QuestRoomMesh {
+    XrSpace space;
+    GLuint vertex_buffer;
+    GLuint index_buffer;
+    uint32_t index_count;
+} QuestRoomMesh;
 
 typedef struct QuestPassthroughThemeStyle {
     float tint[3];
@@ -135,6 +148,7 @@ typedef struct QuestApp {
     bool passthrough_style_supported;
     bool passthrough_color_lut_supported;
     bool render_model_supported;
+    bool room_mesh_supported;
     char system_name[XR_MAX_SYSTEM_NAME_SIZE];
     XrFoveationProfileFB foveation_profiles[3];
     unsigned int active_foveation_profile;
@@ -169,6 +183,30 @@ typedef struct QuestApp {
     PFN_xrEnumerateRenderModelPathsFB enumerate_render_model_paths;
     PFN_xrGetRenderModelPropertiesFB get_render_model_properties;
     PFN_xrLoadRenderModelFB load_render_model;
+    PFN_xrQuerySpacesFB query_spaces;
+    PFN_xrRetrieveSpaceQueryResultsFB retrieve_space_query_results;
+    PFN_xrEnumerateSpaceSupportedComponentsFB enumerate_space_components;
+    PFN_xrGetSpaceComponentStatusFB get_space_component_status;
+    PFN_xrSetSpaceComponentStatusFB set_space_component_status;
+    PFN_xrGetSpaceRoomMeshMETA get_space_room_mesh;
+    PFN_xrGetSpaceRoomMeshFaceIndicesMETA get_room_mesh_face_indices;
+    QuestRoomMesh room_meshes[QUEST_ROOM_MESH_MAX];
+    uint32_t room_mesh_count;
+    bool room_query_pending;
+    bool room_query_complete;
+    XrTime room_query_retry_time;
+    GLuint room_pulse_program;
+    GLint room_pulse_projection;
+    GLint room_pulse_eye_position;
+    GLint room_pulse_eye_rotation;
+    GLint room_pulse_anchor_position;
+    GLint room_pulse_anchor_rotation;
+    GLint room_pulse_center;
+    GLint room_pulse_radius;
+    GLint room_pulse_opacity;
+    uint32_t room_observed_star_serial;
+    XrTime room_pulse_start_time;
+    float room_pulse_center_position[3];
     GLuint depth_buffer;
     int32_t depth_width;
     int32_t depth_height;
@@ -199,6 +237,7 @@ static bool openxr_extension_available(const char *name) {
 
 static QuestApp *sActiveQuestApp;
 static bool poll_openxr_events(QuestApp *app);
+static bool initialize_room_mesh(QuestApp *app);
 
 /* Long first-launch mod and DynOS scans run on android_main because they need
  * the game renderer's thread.  Android still requires this same thread to
@@ -477,7 +516,7 @@ static bool create_openxr_instance(QuestApp *app) {
         return false;
     }
 
-    const char *extensions[10] = {
+    const char *extensions[20] = {
         XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME,
         XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME,
     };
@@ -524,6 +563,20 @@ static bool create_openxr_instance(QuestApp *app) {
         openxr_extension_available(XR_FB_RENDER_MODEL_EXTENSION_NAME);
     if (app->render_model_supported) {
         extensions[extension_count++] = XR_FB_RENDER_MODEL_EXTENSION_NAME;
+    }
+    app->room_mesh_supported =
+        openxr_extension_available(XR_FB_SPATIAL_ENTITY_EXTENSION_NAME) &&
+        openxr_extension_available(XR_FB_SPATIAL_ENTITY_QUERY_EXTENSION_NAME) &&
+        openxr_extension_available(XR_FB_SPATIAL_ENTITY_STORAGE_EXTENSION_NAME) &&
+        openxr_extension_available(XR_FB_SCENE_EXTENSION_NAME) &&
+        openxr_extension_available(XR_META_SPATIAL_ENTITY_ROOM_MESH_EXTENSION_NAME);
+    if (app->room_mesh_supported) {
+        extensions[extension_count++] = XR_FB_SPATIAL_ENTITY_EXTENSION_NAME;
+        extensions[extension_count++] = XR_FB_SPATIAL_ENTITY_QUERY_EXTENSION_NAME;
+        extensions[extension_count++] = XR_FB_SPATIAL_ENTITY_STORAGE_EXTENSION_NAME;
+        extensions[extension_count++] = XR_FB_SCENE_EXTENSION_NAME;
+        extensions[extension_count++] =
+            XR_META_SPATIAL_ENTITY_ROOM_MESH_EXTENSION_NAME;
     }
 
     XrInstanceCreateInfoAndroidKHR android_info = {
@@ -1334,6 +1387,7 @@ static bool create_openxr_session(QuestApp *app) {
     }
 
     initialize_passthrough(app);
+    initialize_room_mesh(app);
 
     LOGI("OpenXR OpenGL ES session created.");
     return true;
@@ -1672,7 +1726,458 @@ static void update_display_refresh_rate_if_needed(QuestApp *app) {
     configure_display_refresh_rate(app);
 }
 
-static bool render_eye(QuestApp *app, uint32_t eye) {
+static bool room_space_has_component(
+    QuestApp *app, XrSpace space, XrSpaceComponentTypeFB wanted) {
+    uint32_t count = 0;
+    if (XR_FAILED(app->enumerate_space_components(
+            space, 0, &count, NULL)) || count == 0) return false;
+    XrSpaceComponentTypeFB *components =
+        calloc(count, sizeof(*components));
+    if (components == NULL) return false;
+    const XrResult result = app->enumerate_space_components(
+        space, count, &count, components);
+    bool found = false;
+    if (XR_SUCCEEDED(result)) {
+        for (uint32_t i = 0; i < count; ++i) {
+            if (components[i] == wanted) {
+                found = true;
+                break;
+            }
+        }
+    }
+    free(components);
+    return found;
+}
+
+static bool room_space_component_enabled(
+    QuestApp *app, XrSpace space, XrSpaceComponentTypeFB type) {
+    XrSpaceComponentStatusFB status = {
+        .type = XR_TYPE_SPACE_COMPONENT_STATUS_FB,
+    };
+    return XR_SUCCEEDED(app->get_space_component_status(
+        space, type, &status)) && status.enabled && !status.changePending;
+}
+
+static bool load_room_mesh(QuestApp *app, XrSpace space) {
+    for (uint32_t i = 0; i < app->room_mesh_count; ++i) {
+        if (app->room_meshes[i].space == space) return true;
+    }
+    if (app->room_mesh_count >= QUEST_ROOM_MESH_MAX) {
+        xrDestroySpace(space);
+        return false;
+    }
+
+    static const XrSemanticLabelMETA labels[] = {
+        XR_SEMANTIC_LABEL_FLOOR_META,
+        XR_SEMANTIC_LABEL_CEILING_META,
+        XR_SEMANTIC_LABEL_WALL_FACE_META,
+        XR_SEMANTIC_LABEL_INNER_WALL_FACE_META,
+        XR_SEMANTIC_LABEL_INVISIBLE_WALL_FACE_META,
+        XR_SEMANTIC_LABEL_DOOR_FRAME_META,
+        XR_SEMANTIC_LABEL_WINDOW_FRAME_META,
+    };
+    XrSpaceRoomMeshGetInfoMETA get_info = {
+        .type = XR_TYPE_SPACE_ROOM_MESH_GET_INFO_META,
+        .recognizedSemanticLabelCount =
+            (uint32_t)(sizeof(labels) / sizeof(labels[0])),
+        .recognizedSemanticLabels = labels,
+    };
+    XrRoomMeshMETA room = {.type = XR_TYPE_ROOM_MESH_META};
+    XrResult result = app->get_space_room_mesh(space, &get_info, &room);
+    if (XR_FAILED(result) || room.vertexCountOutput == 0 ||
+        room.faceCountOutput == 0 || room.vertexCountOutput > 2000000U ||
+        room.faceCountOutput > 1000000U) {
+        LOGI("Room Mesh geometry was unavailable (%d, %u vertices, %u faces).",
+             (int)result, room.vertexCountOutput, room.faceCountOutput);
+        xrDestroySpace(space);
+        return false;
+    }
+
+    XrVector3f *vertices = calloc(room.vertexCountOutput, sizeof(*vertices));
+    XrRoomMeshFaceMETA *faces =
+        calloc(room.faceCountOutput, sizeof(*faces));
+    if (vertices == NULL || faces == NULL) {
+        free(vertices);
+        free(faces);
+        xrDestroySpace(space);
+        return false;
+    }
+    room.vertexCapacityInput = room.vertexCountOutput;
+    room.vertices = vertices;
+    room.faceCapacityInput = room.faceCountOutput;
+    room.faces = faces;
+    result = app->get_space_room_mesh(space, &get_info, &room);
+    if (XR_FAILED(result)) {
+        LOGI("Could not read Room Mesh vertices (%d).", (int)result);
+        free(vertices);
+        free(faces);
+        xrDestroySpace(space);
+        return false;
+    }
+
+    uint32_t *indices = NULL;
+    uint32_t index_count = 0;
+    for (uint32_t face = 0; face < room.faceCountOutput; ++face) {
+        XrRoomMeshFaceIndicesMETA face_indices = {
+            .type = XR_TYPE_ROOM_MESH_FACE_INDICES_META,
+        };
+        result = app->get_room_mesh_face_indices(
+            space, &faces[face].uuid, &face_indices);
+        if (XR_FAILED(result) || face_indices.indexCountOutput == 0) continue;
+        if (face_indices.indexCountOutput > 6000000U - index_count) {
+            LOGI("Room Mesh index data exceeded the safety limit.");
+            free(indices);
+            free(vertices);
+            free(faces);
+            xrDestroySpace(space);
+            return false;
+        }
+        const uint32_t new_count =
+            index_count + face_indices.indexCountOutput;
+        uint32_t *grown = realloc(indices, new_count * sizeof(*grown));
+        if (grown == NULL) {
+            free(indices);
+            free(vertices);
+            free(faces);
+            xrDestroySpace(space);
+            return false;
+        }
+        indices = grown;
+        face_indices.indexCapacityInput = face_indices.indexCountOutput;
+        face_indices.indices = indices + index_count;
+        result = app->get_room_mesh_face_indices(
+            space, &faces[face].uuid, &face_indices);
+        if (XR_SUCCEEDED(result)) {
+            index_count += face_indices.indexCountOutput;
+        }
+    }
+    free(faces);
+    if (index_count == 0) {
+        free(indices);
+        free(vertices);
+        xrDestroySpace(space);
+        return false;
+    }
+
+    QuestRoomMesh *mesh = &app->room_meshes[app->room_mesh_count];
+    mesh->space = space;
+    mesh->index_count = index_count;
+    glGenBuffers(1, &mesh->vertex_buffer);
+    glBindBuffer(GL_ARRAY_BUFFER, mesh->vertex_buffer);
+    glBufferData(GL_ARRAY_BUFFER,
+                 room.vertexCountOutput * sizeof(*vertices), vertices,
+                 GL_STATIC_DRAW);
+    glGenBuffers(1, &mesh->index_buffer);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->index_buffer);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                 index_count * sizeof(*indices), indices, GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    free(indices);
+    free(vertices);
+    ++app->room_mesh_count;
+    LOGI("Loaded Room Mesh %u: %u vertices, %u triangle indices.",
+         app->room_mesh_count, room.vertexCountOutput, index_count);
+    return true;
+}
+
+static void handle_room_query_results(
+    QuestApp *app, XrAsyncRequestIdFB request_id) {
+    XrSpaceQueryResultsFB query = {
+        .type = XR_TYPE_SPACE_QUERY_RESULTS_FB,
+    };
+    XrResult result = app->retrieve_space_query_results(
+        app->session, request_id, &query);
+    if (XR_FAILED(result) || query.resultCountOutput == 0) {
+        LOGI("Room Mesh query returned no rooms (%d).", (int)result);
+        return;
+    }
+    XrSpaceQueryResultFB *results =
+        calloc(query.resultCountOutput, sizeof(*results));
+    if (results == NULL) return;
+    query.resultCapacityInput = query.resultCountOutput;
+    query.results = results;
+    result = app->retrieve_space_query_results(
+        app->session, request_id, &query);
+    if (XR_FAILED(result)) {
+        free(results);
+        return;
+    }
+
+    for (uint32_t i = 0; i < query.resultCountOutput; ++i) {
+        XrSpace space = results[i].space;
+        if (!room_space_has_component(
+                app, space, XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB)) {
+            xrDestroySpace(space);
+            continue;
+        }
+        XrSpaceComponentStatusSetInfoFB set_info = {
+            .type = XR_TYPE_SPACE_COMPONENT_STATUS_SET_INFO_FB,
+            .componentType = XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB,
+            .enabled = XR_TRUE,
+            .timeout = 0,
+        };
+        XrAsyncRequestIdFB set_request = 0;
+        result = app->set_space_component_status(
+            space, &set_info, &set_request);
+        if (result == XR_ERROR_SPACE_COMPONENT_STATUS_ALREADY_SET_FB ||
+            room_space_component_enabled(
+                app, space, XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB)) {
+            (void)load_room_mesh(app, space);
+        } else if (XR_FAILED(result)) {
+            LOGI("Could not make Room Mesh locatable (%d).", (int)result);
+            xrDestroySpace(space);
+        }
+    }
+    free(results);
+}
+
+static void request_room_mesh_query(QuestApp *app, XrTime display_time) {
+    if (!app->room_mesh_supported || app->room_query_pending ||
+        app->room_query_complete || app->room_mesh_count > 0 ||
+        !quest_game_tabletop_mr_requested() ||
+        app->session_state != XR_SESSION_STATE_FOCUSED ||
+        display_time < app->room_query_retry_time) return;
+
+    XrSpaceStorageLocationFilterInfoFB storage = {
+        .type = XR_TYPE_SPACE_STORAGE_LOCATION_FILTER_INFO_FB,
+        .location = XR_SPACE_STORAGE_LOCATION_LOCAL_FB,
+    };
+    XrSpaceComponentFilterInfoFB component = {
+        .type = XR_TYPE_SPACE_COMPONENT_FILTER_INFO_FB,
+        .next = &storage,
+        .componentType = XR_SPACE_COMPONENT_TYPE_ROOM_MESH_META,
+    };
+    XrSpaceQueryInfoFB query = {
+        .type = XR_TYPE_SPACE_QUERY_INFO_FB,
+        .queryAction = XR_SPACE_QUERY_ACTION_LOAD_FB,
+        .maxResultCount = QUEST_ROOM_QUERY_MAX_RESULTS,
+        .timeout = 0,
+        .filter = (const XrSpaceFilterInfoBaseHeaderFB *)&component,
+    };
+    XrAsyncRequestIdFB request_id = 0;
+    const XrResult result = app->query_spaces(
+        app->session, (const XrSpaceQueryInfoBaseHeaderFB *)&query,
+        &request_id);
+    if (XR_SUCCEEDED(result)) {
+        app->room_query_pending = true;
+        LOGI("Requested the Meta Room Mesh for the tabletop star pulse.");
+    } else {
+        app->room_query_retry_time = display_time + 2000000000LL;
+        LOGI("Room Mesh query is not ready yet (%d); will retry.", (int)result);
+    }
+}
+
+static bool initialize_room_mesh(QuestApp *app) {
+    if (!app->room_mesh_supported) {
+        LOGI("Meta Room Mesh extensions are unavailable; star pulse fallback remains active.");
+        return true;
+    }
+#define LOAD_ROOM_PROC(member, name) \
+    xrGetInstanceProcAddr(app->instance, name, \
+        (PFN_xrVoidFunction *)&app->member)
+    LOAD_ROOM_PROC(query_spaces, "xrQuerySpacesFB");
+    LOAD_ROOM_PROC(retrieve_space_query_results,
+                   "xrRetrieveSpaceQueryResultsFB");
+    LOAD_ROOM_PROC(enumerate_space_components,
+                   "xrEnumerateSpaceSupportedComponentsFB");
+    LOAD_ROOM_PROC(get_space_component_status,
+                   "xrGetSpaceComponentStatusFB");
+    LOAD_ROOM_PROC(set_space_component_status,
+                   "xrSetSpaceComponentStatusFB");
+    LOAD_ROOM_PROC(get_space_room_mesh, "xrGetSpaceRoomMeshMETA");
+    LOAD_ROOM_PROC(get_room_mesh_face_indices,
+                   "xrGetSpaceRoomMeshFaceIndicesMETA");
+#undef LOAD_ROOM_PROC
+    app->room_mesh_supported = app->query_spaces != NULL &&
+        app->retrieve_space_query_results != NULL &&
+        app->enumerate_space_components != NULL &&
+        app->get_space_component_status != NULL &&
+        app->set_space_component_status != NULL &&
+        app->get_space_room_mesh != NULL &&
+        app->get_room_mesh_face_indices != NULL;
+    if (!app->room_mesh_supported) {
+        LOGI("Meta Room Mesh functions are incomplete; scanner disabled.");
+        return true;
+    }
+
+    const char *vertex_source =
+        "#version 300 es\n"
+        "layout(location=0) in vec3 position;\n"
+        "uniform mat4 projection; uniform vec3 eyePosition;\n"
+        "uniform vec4 eyeRotation; uniform vec3 anchorPosition;\n"
+        "uniform vec4 anchorRotation; out vec3 worldPosition;\n"
+        "vec3 qr(vec4 q, vec3 v){return v+2.0*cross(q.xyz,cross(q.xyz,v)+q.w*v);}\n"
+        "void main(){worldPosition=qr(anchorRotation,position)+anchorPosition;"
+        "vec4 iq=vec4(-eyeRotation.xyz,eyeRotation.w);"
+        "vec3 view=qr(iq,worldPosition-eyePosition);"
+        "gl_Position=projection*vec4(view,1.0);}\n";
+    const char *fragment_source =
+        "#version 300 es\n"
+        "precision highp float; in vec3 worldPosition; out vec4 color;\n"
+        "uniform vec3 pulseCenter; uniform float pulseRadius; uniform float pulseOpacity;\n"
+        "void main(){float d=abs(distance(worldPosition,pulseCenter)-pulseRadius);"
+        "float band=1.0-smoothstep(0.10,0.28,d);"
+        "float glow=1.0-smoothstep(0.28,0.62,d);"
+        "float a=(band*0.82+glow*0.20)*pulseOpacity;"
+        "color=vec4(vec3(1.0,0.58,0.035)*a,a);}\n";
+    const GLuint vertex = compile_shader(GL_VERTEX_SHADER, vertex_source);
+    const GLuint fragment = compile_shader(GL_FRAGMENT_SHADER, fragment_source);
+    if (vertex == 0 || fragment == 0) {
+        if (vertex != 0) glDeleteShader(vertex);
+        if (fragment != 0) glDeleteShader(fragment);
+        app->room_mesh_supported = false;
+        return true;
+    }
+    app->room_pulse_program = glCreateProgram();
+    glAttachShader(app->room_pulse_program, vertex);
+    glAttachShader(app->room_pulse_program, fragment);
+    glLinkProgram(app->room_pulse_program);
+    glDeleteShader(vertex);
+    glDeleteShader(fragment);
+    GLint linked = GL_FALSE;
+    glGetProgramiv(app->room_pulse_program, GL_LINK_STATUS, &linked);
+    if (!linked) {
+        LOGI("Room Mesh scanner shader could not be linked.");
+        glDeleteProgram(app->room_pulse_program);
+        app->room_pulse_program = 0;
+        app->room_mesh_supported = false;
+        return true;
+    }
+    app->room_pulse_projection =
+        glGetUniformLocation(app->room_pulse_program, "projection");
+    app->room_pulse_eye_position =
+        glGetUniformLocation(app->room_pulse_program, "eyePosition");
+    app->room_pulse_eye_rotation =
+        glGetUniformLocation(app->room_pulse_program, "eyeRotation");
+    app->room_pulse_anchor_position =
+        glGetUniformLocation(app->room_pulse_program, "anchorPosition");
+    app->room_pulse_anchor_rotation =
+        glGetUniformLocation(app->room_pulse_program, "anchorRotation");
+    app->room_pulse_center =
+        glGetUniformLocation(app->room_pulse_program, "pulseCenter");
+    app->room_pulse_radius =
+        glGetUniformLocation(app->room_pulse_program, "pulseRadius");
+    app->room_pulse_opacity =
+        glGetUniformLocation(app->room_pulse_program, "pulseOpacity");
+    app->room_observed_star_serial = quest_game_star_collection_serial();
+    LOGI("Meta Room Mesh scanner is ready; awaiting spatial-data permission.");
+    return true;
+}
+
+static void update_room_pulse(QuestApp *app, XrTime display_time) {
+    request_room_mesh_query(app, display_time);
+    const uint32_t serial = quest_game_star_collection_serial();
+    if (serial == app->room_observed_star_serial) return;
+    app->room_observed_star_serial = serial;
+    float recentered[3];
+    if (quest_game_tabletop_mario_tracking_position(recentered) &&
+        quest_vr_bridge_recentered_to_local(
+            recentered, app->room_pulse_center_position)) {
+        app->room_pulse_start_time = display_time;
+        LOGI("Room Mesh star pulse started at Mario.");
+    }
+}
+
+static void build_projection_matrix(const XrFovf *fov, float out[16]) {
+    memset(out, 0, sizeof(float) * 16);
+    const float left = tanf(fov->angleLeft);
+    const float right = tanf(fov->angleRight);
+    const float down = tanf(fov->angleDown);
+    const float up = tanf(fov->angleUp);
+    const float near_z = 0.03f;
+    const float far_z = 30.0f;
+    out[0] = 2.0f / (right - left);
+    out[5] = 2.0f / (up - down);
+    out[8] = (right + left) / (right - left);
+    out[9] = (up + down) / (up - down);
+    out[10] = -(far_z + near_z) / (far_z - near_z);
+    out[11] = -1.0f;
+    out[14] = -(2.0f * far_z * near_z) / (far_z - near_z);
+}
+
+static void render_room_pulse(
+    QuestApp *app, uint32_t eye, XrTime display_time) {
+    if (app->room_pulse_program == 0 || app->room_mesh_count == 0 ||
+        app->room_pulse_start_time == 0 ||
+        display_time <= app->room_pulse_start_time) return;
+    const XrDuration elapsed = display_time - app->room_pulse_start_time;
+    if (elapsed >= QUEST_ROOM_PULSE_DURATION_NS) return;
+    const float progress =
+        (float)((double)elapsed / (double)QUEST_ROOM_PULSE_DURATION_NS);
+    const float radius = 0.08f + progress * 8.0f;
+    const float opacity = sinf(progress * 3.14159265f) * 0.92f;
+    float projection[16];
+    build_projection_matrix(&app->views[eye].fov, projection);
+
+    const GLboolean blend_was_enabled = glIsEnabled(GL_BLEND);
+    const GLboolean depth_was_enabled = glIsEnabled(GL_DEPTH_TEST);
+    const GLboolean cull_was_enabled = glIsEnabled(GL_CULL_FACE);
+    GLint old_program = 0;
+    GLint old_vertex_array = 0;
+    GLint old_blend_src_rgb = 0;
+    GLint old_blend_dst_rgb = 0;
+    glGetIntegerv(GL_CURRENT_PROGRAM, &old_program);
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &old_vertex_array);
+    glGetIntegerv(GL_BLEND_SRC_RGB, &old_blend_src_rgb);
+    glGetIntegerv(GL_BLEND_DST_RGB, &old_blend_dst_rgb);
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE);
+    glDisable(GL_DEPTH_TEST);
+    glDisable(GL_CULL_FACE);
+    glBindVertexArray(0);
+    glUseProgram(app->room_pulse_program);
+    glUniformMatrix4fv(app->room_pulse_projection, 1, GL_FALSE, projection);
+    glUniform3f(app->room_pulse_eye_position,
+        app->views[eye].pose.position.x, app->views[eye].pose.position.y,
+        app->views[eye].pose.position.z);
+    glUniform4f(app->room_pulse_eye_rotation,
+        app->views[eye].pose.orientation.x,
+        app->views[eye].pose.orientation.y,
+        app->views[eye].pose.orientation.z,
+        app->views[eye].pose.orientation.w);
+    glUniform3fv(app->room_pulse_center, 1,
+                app->room_pulse_center_position);
+    glUniform1f(app->room_pulse_radius, radius);
+    glUniform1f(app->room_pulse_opacity, opacity);
+
+    for (uint32_t i = 0; i < app->room_mesh_count; ++i) {
+        QuestRoomMesh *mesh = &app->room_meshes[i];
+        XrSpaceLocation location = {.type = XR_TYPE_SPACE_LOCATION};
+        const XrResult located = xrLocateSpace(
+            mesh->space, app->local_space, display_time, &location);
+        const XrSpaceLocationFlags needed =
+            XR_SPACE_LOCATION_POSITION_VALID_BIT |
+            XR_SPACE_LOCATION_ORIENTATION_VALID_BIT;
+        if (XR_FAILED(located) ||
+            (location.locationFlags & needed) != needed) continue;
+        glUniform3f(app->room_pulse_anchor_position,
+            location.pose.position.x, location.pose.position.y,
+            location.pose.position.z);
+        glUniform4f(app->room_pulse_anchor_rotation,
+            location.pose.orientation.x, location.pose.orientation.y,
+            location.pose.orientation.z, location.pose.orientation.w);
+        glBindBuffer(GL_ARRAY_BUFFER, mesh->vertex_buffer);
+        glEnableVertexAttribArray(0);
+        glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE,
+                              sizeof(XrVector3f), (const void *)0);
+        glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->index_buffer);
+        glDrawElements(GL_TRIANGLES, (GLsizei)mesh->index_count,
+                       GL_UNSIGNED_INT, (const void *)0);
+    }
+    glDisableVertexAttribArray(0);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    glBindVertexArray((GLuint)old_vertex_array);
+    glUseProgram((GLuint)old_program);
+    glBlendFunc((GLenum)old_blend_src_rgb, (GLenum)old_blend_dst_rgb);
+    if (!blend_was_enabled) glDisable(GL_BLEND);
+    if (depth_was_enabled) glEnable(GL_DEPTH_TEST);
+    if (cull_was_enabled) glEnable(GL_CULL_FACE);
+}
+
+static bool render_eye(
+    QuestApp *app, uint32_t eye, XrTime display_time) {
     QuestSwapchain *swapchain = &app->swapchains[eye];
     uint32_t image_index = 0;
     XrSwapchainImageAcquireInfo acquire_info = {
@@ -1728,6 +2233,7 @@ static bool render_eye(QuestApp *app, uint32_t eye) {
         glDrawArrays(GL_TRIANGLES, 0, 6);
         glDisable(GL_BLEND);
     }
+    render_room_pulse(app, eye, display_time);
     // Adreno is tile based. Depth is cleared before the next eye and never
     // sampled or submitted to OpenXR, so prevent a needless depth-tile store.
     const GLenum discard_attachments[] = { GL_DEPTH_ATTACHMENT };
@@ -1859,8 +2365,10 @@ static bool render_frame(QuestApp *app) {
             }
             quest_vr_bridge_update_views(positions, rotations, fovs, widths, heights);
             quest_game_prepare_vr_frame();
+            update_room_pulse(app, frame_state.predictedDisplayTime);
             for (uint32_t eye = 0; eye < QUEST_VIEW_COUNT; ++eye) {
-                if (!render_eye(app, eye)) {
+                if (!render_eye(
+                        app, eye, frame_state.predictedDisplayTime)) {
                     return false;
                 }
                 projection_views[eye].type =
@@ -1948,6 +2456,35 @@ static bool poll_openxr_events(QuestApp *app) {
             }
         } else if (event.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING) {
             app->exit_requested = true;
+        } else if (app->room_mesh_supported &&
+                   event.type ==
+                       XR_TYPE_EVENT_DATA_SPACE_QUERY_RESULTS_AVAILABLE_FB) {
+            const XrEventDataSpaceQueryResultsAvailableFB *available =
+                (const XrEventDataSpaceQueryResultsAvailableFB *)&event;
+            handle_room_query_results(app, available->requestId);
+        } else if (app->room_mesh_supported &&
+                   event.type == XR_TYPE_EVENT_DATA_SPACE_QUERY_COMPLETE_FB) {
+            const XrEventDataSpaceQueryCompleteFB *complete =
+                (const XrEventDataSpaceQueryCompleteFB *)&event;
+            app->room_query_pending = false;
+            app->room_query_complete = true;
+            LOGI("Room Mesh query completed with result %d and %u loaded room(s).",
+                 (int)complete->result, app->room_mesh_count);
+        } else if (app->room_mesh_supported &&
+                   event.type ==
+                       XR_TYPE_EVENT_DATA_SPACE_SET_STATUS_COMPLETE_FB) {
+            const XrEventDataSpaceSetStatusCompleteFB *complete =
+                (const XrEventDataSpaceSetStatusCompleteFB *)&event;
+            if (XR_SUCCEEDED(complete->result) &&
+                complete->componentType ==
+                    XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB &&
+                room_space_component_enabled(
+                    app, complete->space,
+                    XR_SPACE_COMPONENT_TYPE_ROOM_MESH_META)) {
+                (void)load_room_mesh(app, complete->space);
+            } else if (XR_FAILED(complete->result)) {
+                xrDestroySpace(complete->space);
+            }
         }
 
         event.type = XR_TYPE_EVENT_DATA_BUFFER;
@@ -1959,6 +2496,17 @@ static bool poll_openxr_events(QuestApp *app) {
 static void destroy_quest_app(QuestApp *app) {
     quest_game_flush_persistent_state();
     quest_input_shutdown();
+    for (uint32_t i = 0; i < app->room_mesh_count; ++i) {
+        QuestRoomMesh *mesh = &app->room_meshes[i];
+        if (mesh->vertex_buffer != 0)
+            glDeleteBuffers(1, &mesh->vertex_buffer);
+        if (mesh->index_buffer != 0)
+            glDeleteBuffers(1, &mesh->index_buffer);
+        if (mesh->space != XR_NULL_HANDLE)
+            xrDestroySpace(mesh->space);
+    }
+    if (app->room_pulse_program != 0)
+        glDeleteProgram(app->room_pulse_program);
     if (app->mario_texture != 0) glDeleteTextures(1, &app->mario_texture);
     if (app->mario_program != 0) glDeleteProgram(app->mario_program);
     destroy_swapchain_render_targets(app);
