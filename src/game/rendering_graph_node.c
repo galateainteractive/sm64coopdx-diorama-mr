@@ -793,6 +793,7 @@ static f32 sVrTabletopGestureStartAngle = 0.0f;
 static f32 sVrTabletopGestureStartScale = VR_TABLETOP_WORLD_SCALE;
 static s16 sVrTabletopGestureStartYaw = 0;
 static bool sVrTabletopGestureStartAngleValid = false;
+static void vr_build_tabletop_transform(Mat4 transform);
 static void vr_apply_tabletop_hand_space_correction(Mat4 matrix);
 static bool sVrHeadRotationMatrixValid = false;
 static float sVrHeadRotationQuaternion[4] = { 0 };
@@ -2594,6 +2595,51 @@ static bool vr_get_head_tracked_audio_vector(
         return false;
     }
 
+    if (configVrCameraMode == VR_CAMERA_MODE_TABLETOP) {
+        if (!sVrTabletopAnchorValid) {
+            return false;
+        }
+
+        float headTranslation[3] = { 0 };
+        Mat4 tabletopTransform;
+        Mat4 headRotation;
+        if (!vr_get_head_translation(headTranslation) ||
+            !vr_build_head_rotation_matrix(headRotation)) {
+            return false;
+        }
+
+        // Convert the gameplay-only source into the same fixed tracking-space
+        // miniature used for rendering. Values remain in 100-units-per-meter
+        // room coordinates so the audio mixer can apply a tabletop-specific
+        // distance curve while retaining SM64's existing stereo panner.
+        vr_build_tabletop_transform(tabletopTransform);
+        Vec3f sourceTracking;
+        for (u32 axis = 0; axis < 3; axis++) {
+            sourceTracking[axis] = tabletopTransform[3][axis];
+            for (u32 sourceAxis = 0; sourceAxis < 3; sourceAxis++) {
+                sourceTracking[axis] +=
+                    sourceWorldPosition[sourceAxis] *
+                    tabletopTransform[sourceAxis][axis];
+            }
+        }
+
+        const Vec3f relativeTracking = {
+            sourceTracking[0] -
+                headTranslation[0] * VR_TABLETOP_UNITS_PER_METER,
+            sourceTracking[1] -
+                headTranslation[1] * VR_TABLETOP_UNITS_PER_METER,
+            sourceTracking[2] -
+                headTranslation[2] * VR_TABLETOP_UNITS_PER_METER
+        };
+        for (u32 headAxis = 0; headAxis < 3; headAxis++) {
+            cameraToObject[headAxis] =
+                relativeTracking[0] * headRotation[0][headAxis] +
+                relativeTracking[1] * headRotation[1][headAxis] +
+                relativeTracking[2] * headRotation[2][headAxis];
+        }
+        return true;
+    }
+
     if (!sVrAudioListenerPreparedForFrame) {
         // Object traversal can contain thousands of nodes. Resolve the
         // listener exactly once for this graph build, including on a failed
@@ -4201,7 +4247,8 @@ void patch_mtx_before(void) {
     }
     sVrHeadTrackedAudioEnabledForFrame =
         configVrImmersive3dSound &&
-        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+        (configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON ||
+         configVrCameraMode == VR_CAMERA_MODE_TABLETOP) &&
         vr_is_active();
     sVrAudioListenerPreparedForFrame = false;
     sVrAudioListenerValid = false;
@@ -7726,6 +7773,7 @@ static void geo_process_object(struct Object *node) {
             node->header.gfx.cameraToObject
         );
         if (sVrHeadTrackedAudioEnabledForFrame &&
+            configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
             gMarioStates[0].marioObj != NULL &&
             node == gMarioStates[0].marioObj) {
             // Local footsteps, voice, landing, and movement sounds all use

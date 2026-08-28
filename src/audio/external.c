@@ -16,6 +16,7 @@
 #include "dialog_ids.h"
 #include "level_table.h"
 #include "pc/debuglog.h"
+#include "pc/configfile.h"
 #include "pc/lua/utils/smlua_level_utils.h"
 #include "pc/lua/smlua_hooks.h"
 #include "pc/dialog_table.h"
@@ -1273,6 +1274,38 @@ static f32 get_sound_volume(u8 bank, u8 soundIndex, f32 volumeRange) {
 #endif
 
     if (!(sSoundBanks[bank][soundIndex].soundBits & SOUND_NO_VOLUME_LOSS)) {
+        if (configVrImmersive3dSound &&
+            configVrCameraMode == VR_CAMERA_MODE_TABLETOP) {
+            const f32 nearDistance =
+                VR_TABLETOP_AUDIO_NEAR_METERS *
+                VR_TABLETOP_UNITS_PER_METER;
+            const f32 softDistance =
+                VR_TABLETOP_AUDIO_SOFT_METERS *
+                VR_TABLETOP_UNITS_PER_METER;
+            const f32 cutoffDistance =
+                VR_TABLETOP_AUDIO_CUTOFF_METERS *
+                VR_TABLETOP_UNITS_PER_METER;
+            const f32 distance =
+                sSoundBanks[bank][soundIndex].distance;
+
+            if (distance <= nearDistance) {
+                intensity = 1.0f;
+            } else if (distance < softDistance) {
+                f32 t = (distance - nearDistance) /
+                    (softDistance - nearDistance);
+                t = t * t * (3.0f - 2.0f * t);
+                intensity = 1.0f -
+                    t * (1.0f - VR_TABLETOP_AUDIO_SOFT_GAIN);
+            } else if (distance < cutoffDistance) {
+                f32 t = (distance - softDistance) /
+                    (cutoffDistance - softDistance);
+                t = t * t * (3.0f - 2.0f * t);
+                intensity = VR_TABLETOP_AUDIO_SOFT_GAIN *
+                    (1.0f - t);
+            } else {
+                intensity = 0.0f;
+            }
+        } else {
 #ifdef VERSION_JP
         // Intensity linearly lowers from 1 at the camera to 0 at maxSoundDistance
         maxSoundDistance = get_level_acoustic_reaches(gCurrLevelNum);
@@ -1298,6 +1331,7 @@ static f32 get_sound_volume(u8 bank, u8 soundIndex, f32 volumeRange) {
             }
         }
 #endif
+        }
 
         if (sSoundBanks[bank][soundIndex].soundBits & SOUND_VIBRATO) {
 #ifdef VERSION_JP

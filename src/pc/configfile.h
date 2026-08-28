@@ -127,6 +127,13 @@ enum VrCameraMode {
 #define VR_TABLETOP_FORWARD_METERS   1.50f
 #define VR_TABLETOP_DOWN_METERS      0.75f
 #define VR_TABLETOP_UNITS_PER_METER  100.0f
+// Positional effects remain full-volume while the listener is close to the
+// miniature, then fall gently across a normal room instead of using SM64's
+// much larger level-scale acoustic distances.
+#define VR_TABLETOP_AUDIO_NEAR_METERS    0.35f
+#define VR_TABLETOP_AUDIO_SOFT_METERS    2.50f
+#define VR_TABLETOP_AUDIO_CUTOFF_METERS  4.00f
+#define VR_TABLETOP_AUDIO_SOFT_GAIN      0.20f
 
 enum VrFacingSource {
     VR_FACING_SOURCE_HEADSET,
