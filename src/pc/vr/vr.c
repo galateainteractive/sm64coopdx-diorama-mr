@@ -11,6 +11,7 @@ static bool sPhysicalPunchPending[VR_CONTROLLER_COUNT] = {
     false,
     false
 };
+static uint32_t sStarCollectionSerial = 0;
 
 static void vr_clear_physical_punches(void) {
     for (uint32_t hand = 0;
@@ -249,6 +250,14 @@ bool vr_consume_physical_punch(uint32_t handIndex) {
     const bool pending = sPhysicalPunchPending[handIndex];
     sPhysicalPunchPending[handIndex] = false;
     return pending;
+}
+
+void vr_notify_star_collected(void) {
+    sStarCollectionSerial++;
+}
+
+uint32_t vr_get_star_collection_serial(void) {
+    return sStarCollectionSerial;
 }
 
 void vr_shutdown(void) {

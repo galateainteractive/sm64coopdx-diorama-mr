@@ -11,6 +11,7 @@
 #include "game/level_update.h"
 #include "game/rendering_graph_node.h"
 #include "game/save_file.h"
+#include "level_table.h"
 #include "pc/configfile.h"
 #include "pc/chat_commands.h"
 #include "pc/audio/audio_api.h"
@@ -378,6 +379,50 @@ bool quest_game_is_ready(void) { return sReady; }
 bool quest_game_tabletop_mr_requested(void) {
     return sReady && vr_is_active()
         && configVrCameraMode == VR_CAMERA_MODE_TABLETOP;
+}
+
+enum QuestPassthroughTheme quest_game_passthrough_theme(void) {
+    switch (gCurrLevelNum) {
+        case LEVEL_LLL:
+        case LEVEL_BITFS:
+        case LEVEL_BOWSER_2:
+            return QUEST_PASSTHROUGH_THEME_FIRE;
+        case LEVEL_JRB:
+        case LEVEL_DDD:
+        case LEVEL_WDW:
+        case LEVEL_SA:
+            return QUEST_PASSTHROUGH_THEME_WATER;
+        case LEVEL_CCM:
+        case LEVEL_SL:
+            return QUEST_PASSTHROUGH_THEME_SNOW;
+        case LEVEL_RR:
+        case LEVEL_BITDW:
+        case LEVEL_BITS:
+        case LEVEL_TOTWC:
+        case LEVEL_WMOTR:
+        case LEVEL_VCUTM:
+            return QUEST_PASSTHROUGH_THEME_SKY;
+        case LEVEL_HMC:
+        case LEVEL_COTMC:
+            return QUEST_PASSTHROUGH_THEME_CAVE;
+        case LEVEL_BBH:
+            return QUEST_PASSTHROUGH_THEME_SPOOKY;
+        case LEVEL_SSL:
+            return QUEST_PASSTHROUGH_THEME_DESERT;
+        case LEVEL_BOB:
+        case LEVEL_WF:
+        case LEVEL_THI:
+        case LEVEL_TTM:
+        case LEVEL_CASTLE_GROUNDS:
+        case LEVEL_CASTLE_COURTYARD:
+            return QUEST_PASSTHROUGH_THEME_GRASS;
+        default:
+            return QUEST_PASSTHROUGH_THEME_NEUTRAL;
+    }
+}
+
+uint32_t quest_game_star_collection_serial(void) {
+    return vr_get_star_collection_serial();
 }
 
 void quest_game_prepare_vr_frame(void) {

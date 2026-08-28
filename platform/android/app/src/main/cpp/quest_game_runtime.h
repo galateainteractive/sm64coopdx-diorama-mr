@@ -3,6 +3,18 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+enum QuestPassthroughTheme {
+    QUEST_PASSTHROUGH_THEME_NEUTRAL = 0,
+    QUEST_PASSTHROUGH_THEME_GRASS,
+    QUEST_PASSTHROUGH_THEME_WATER,
+    QUEST_PASSTHROUGH_THEME_SNOW,
+    QUEST_PASSTHROUGH_THEME_SKY,
+    QUEST_PASSTHROUGH_THEME_FIRE,
+    QUEST_PASSTHROUGH_THEME_CAVE,
+    QUEST_PASSTHROUGH_THEME_DESERT,
+    QUEST_PASSTHROUGH_THEME_SPOOKY,
+};
+
 bool quest_game_initialize(void);
 void quest_game_load_early_config(void);
 void quest_game_flush_persistent_state(void);
@@ -16,3 +28,5 @@ bool quest_game_render_eye(uint32_t eye, uint32_t width, uint32_t height);
 void quest_game_prepare_vr_frame(void);
 bool quest_game_is_ready(void);
 bool quest_game_tabletop_mr_requested(void);
+enum QuestPassthroughTheme quest_game_passthrough_theme(void);
+uint32_t quest_game_star_collection_serial(void);

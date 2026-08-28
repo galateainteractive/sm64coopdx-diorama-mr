@@ -1080,6 +1080,9 @@ u32 interact_star_or_key(struct MarioState *m, UNUSED u32 interactType, struct O
             network_send_collect_star(o, m->numCoins, starIndex);
         }
         save_file_collect_star_or_key(m->numCoins, starIndex, 0);
+        if (!gLastCollectedStarOrKey) {
+            vr_notify_star_collected();
+        }
 
         s32 numStars = save_file_get_total_star_count(gCurrSaveFileNum - 1, COURSE_MIN - 1, COURSE_MAX - 1);
         for (s32 i = 0; i < MAX_PLAYERS; i++) {

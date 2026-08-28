@@ -65,6 +65,8 @@ bool vr_apply_haptic(
 );
 void vr_queue_physical_punch(uint32_t handIndex);
 bool vr_consume_physical_punch(uint32_t handIndex);
+void vr_notify_star_collected(void);
+uint32_t vr_get_star_collection_serial(void);
 void vr_shutdown(void);
 
 void vr_on_graphics_ready(void);

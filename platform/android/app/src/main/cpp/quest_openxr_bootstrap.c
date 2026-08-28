@@ -33,6 +33,61 @@ extern void quest_vr_bridge_update_views(
 
 #define QUEST_VIEW_COUNT 2U
 #define QUEST_DEFAULT_RENDER_SCALE_PERCENT 80U
+#define QUEST_PASSTHROUGH_LUT_RESOLUTION 32U
+#define QUEST_STAR_PULSE_DURATION_NS 1600000000LL
+
+typedef struct QuestPassthroughThemeStyle {
+    float tint[3];
+    float strength;
+    float brightness;
+    float contrast;
+    float saturation;
+    XrColor4f edge_color;
+} QuestPassthroughThemeStyle;
+
+static const QuestPassthroughThemeStyle sPassthroughThemeStyles[] = {
+    [QUEST_PASSTHROUGH_THEME_NEUTRAL] = {
+        {1.00f, 1.00f, 1.00f}, 0.00f, 0.00f, 0.02f, 1.00f,
+        {0.80f, 0.85f, 1.00f, 0.05f},
+    },
+    [QUEST_PASSTHROUGH_THEME_GRASS] = {
+        {0.80f, 1.22f, 0.76f}, 0.28f, 0.01f, 0.04f, 1.08f,
+        {0.30f, 1.00f, 0.35f, 0.12f},
+    },
+    [QUEST_PASSTHROUGH_THEME_WATER] = {
+        {0.68f, 1.02f, 1.34f}, 0.36f, -0.01f, 0.05f, 1.04f,
+        {0.20f, 0.72f, 1.00f, 0.16f},
+    },
+    [QUEST_PASSTHROUGH_THEME_SNOW] = {
+        {0.88f, 1.03f, 1.22f}, 0.22f, 0.05f, 0.02f, 0.88f,
+        {0.70f, 0.90f, 1.00f, 0.12f},
+    },
+    [QUEST_PASSTHROUGH_THEME_SKY] = {
+        {0.72f, 0.94f, 1.32f}, 0.34f, 0.02f, 0.04f, 1.02f,
+        {0.32f, 0.68f, 1.00f, 0.15f},
+    },
+    [QUEST_PASSTHROUGH_THEME_FIRE] = {
+        {1.38f, 0.66f, 0.48f}, 0.46f, -0.01f, 0.10f, 1.12f,
+        {1.00f, 0.18f, 0.04f, 0.22f},
+    },
+    [QUEST_PASSTHROUGH_THEME_CAVE] = {
+        {0.80f, 0.72f, 1.16f}, 0.30f, -0.06f, 0.12f, 0.82f,
+        {0.52f, 0.32f, 0.92f, 0.14f},
+    },
+    [QUEST_PASSTHROUGH_THEME_DESERT] = {
+        {1.28f, 1.02f, 0.64f}, 0.38f, 0.03f, 0.06f, 1.04f,
+        {1.00f, 0.72f, 0.18f, 0.15f},
+    },
+    [QUEST_PASSTHROUGH_THEME_SPOOKY] = {
+        {0.84f, 0.58f, 1.22f}, 0.42f, -0.05f, 0.14f, 0.76f,
+        {0.72f, 0.18f, 1.00f, 0.20f},
+    },
+};
+
+static const QuestPassthroughThemeStyle sStarPulseStyle = {
+    {1.42f, 1.12f, 0.34f}, 0.72f, 0.12f, 0.16f, 1.18f,
+    {1.00f, 0.78f, 0.08f, 0.95f},
+};
 
 typedef struct QuestSwapchain {
     XrSwapchain handle;
@@ -77,6 +132,8 @@ typedef struct QuestApp {
     bool display_refresh_rate_supported;
     bool passthrough_supported;
     bool passthrough_active;
+    bool passthrough_style_supported;
+    bool passthrough_color_lut_supported;
     bool render_model_supported;
     char system_name[XR_MAX_SYSTEM_NAME_SIZE];
     XrFoveationProfileFB foveation_profiles[3];
@@ -99,6 +156,16 @@ typedef struct QuestApp {
     PFN_xrDestroyPassthroughLayerFB destroy_passthrough_layer;
     PFN_xrPassthroughLayerPauseFB pause_passthrough_layer;
     PFN_xrPassthroughLayerResumeFB resume_passthrough_layer;
+    PFN_xrPassthroughLayerSetStyleFB set_passthrough_style;
+    PFN_xrCreatePassthroughColorLutMETA create_passthrough_color_lut;
+    PFN_xrDestroyPassthroughColorLutMETA destroy_passthrough_color_lut;
+    PFN_xrUpdatePassthroughColorLutMETA update_passthrough_color_lut;
+    XrPassthroughColorLutMETA theme_color_lut;
+    XrPassthroughColorLutMETA star_color_lut;
+    enum QuestPassthroughTheme active_passthrough_theme;
+    uint32_t observed_star_collection_serial;
+    XrTime star_pulse_start_time;
+    float applied_star_pulse_weight;
     PFN_xrEnumerateRenderModelPathsFB enumerate_render_model_paths;
     PFN_xrGetRenderModelPropertiesFB get_render_model_properties;
     PFN_xrLoadRenderModelFB load_render_model;
@@ -410,7 +477,7 @@ static bool create_openxr_instance(QuestApp *app) {
         return false;
     }
 
-    const char *extensions[9] = {
+    const char *extensions[10] = {
         XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME,
         XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME,
     };
@@ -444,6 +511,14 @@ static bool create_openxr_instance(QuestApp *app) {
         openxr_extension_available(XR_FB_PASSTHROUGH_EXTENSION_NAME);
     if (app->passthrough_supported) {
         extensions[extension_count++] = XR_FB_PASSTHROUGH_EXTENSION_NAME;
+    }
+    app->passthrough_color_lut_supported =
+        app->passthrough_supported &&
+        openxr_extension_available(
+            XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME);
+    if (app->passthrough_color_lut_supported) {
+        extensions[extension_count++] =
+            XR_META_PASSTHROUGH_COLOR_LUT_EXTENSION_NAME;
     }
     app->render_model_supported =
         openxr_extension_available(XR_FB_RENDER_MODEL_EXTENSION_NAME);
@@ -659,6 +734,253 @@ static XrFoveationProfileFB create_foveation_level_profile(
     return profile;
 }
 
+static float passthrough_clamp01(float value) {
+    if (value < 0.0f) return 0.0f;
+    if (value > 1.0f) return 1.0f;
+    return value;
+}
+
+static uint8_t passthrough_color_byte(float value) {
+    return (uint8_t)(passthrough_clamp01(value) * 255.0f + 0.5f);
+}
+
+static const QuestPassthroughThemeStyle *passthrough_theme_style(
+    enum QuestPassthroughTheme theme
+) {
+    if (theme < QUEST_PASSTHROUGH_THEME_NEUTRAL ||
+        theme > QUEST_PASSTHROUGH_THEME_SPOOKY) {
+        theme = QUEST_PASSTHROUGH_THEME_NEUTRAL;
+    }
+    return &sPassthroughThemeStyles[theme];
+}
+
+static void build_passthrough_color_lut(
+    const QuestPassthroughThemeStyle *style,
+    uint8_t *buffer
+) {
+    const uint32_t resolution = QUEST_PASSTHROUGH_LUT_RESOLUTION;
+    uint32_t offset = 0;
+    for (uint32_t blue = 0; blue < resolution; ++blue) {
+        for (uint32_t green = 0; green < resolution; ++green) {
+            for (uint32_t red = 0; red < resolution; ++red) {
+                const float input[3] = {
+                    (float)red / (float)(resolution - 1U),
+                    (float)green / (float)(resolution - 1U),
+                    (float)blue / (float)(resolution - 1U),
+                };
+                const float luminance =
+                    input[0] * 0.2126f +
+                    input[1] * 0.7152f +
+                    input[2] * 0.0722f;
+                for (uint32_t channel = 0; channel < 3; ++channel) {
+                    float value = luminance +
+                        (input[channel] - luminance) * style->saturation;
+                    const float tinted = value * style->tint[channel];
+                    value += (tinted - value) * style->strength;
+                    value = (value - 0.5f) *
+                        (1.0f + style->contrast) +
+                        0.5f + style->brightness;
+                    buffer[offset++] = passthrough_color_byte(value);
+                }
+            }
+        }
+    }
+}
+
+static bool create_passthrough_color_lut(
+    QuestApp *app,
+    const QuestPassthroughThemeStyle *style,
+    XrPassthroughColorLutMETA *color_lut
+) {
+    const uint32_t buffer_size =
+        QUEST_PASSTHROUGH_LUT_RESOLUTION *
+        QUEST_PASSTHROUGH_LUT_RESOLUTION *
+        QUEST_PASSTHROUGH_LUT_RESOLUTION * 3U;
+    uint8_t *buffer = malloc(buffer_size);
+    if (buffer == NULL) return false;
+    build_passthrough_color_lut(style, buffer);
+    XrPassthroughColorLutCreateInfoMETA create_info = {
+        .type = XR_TYPE_PASSTHROUGH_COLOR_LUT_CREATE_INFO_META,
+        .channels = XR_PASSTHROUGH_COLOR_LUT_CHANNELS_RGB_META,
+        .resolution = QUEST_PASSTHROUGH_LUT_RESOLUTION,
+        .data = {
+            .bufferSize = buffer_size,
+            .buffer = buffer,
+        },
+    };
+    const XrResult result = app->create_passthrough_color_lut(
+        app->passthrough, &create_info, color_lut);
+    free(buffer);
+    return XR_SUCCEEDED(result);
+}
+
+static bool update_passthrough_color_lut(
+    QuestApp *app,
+    const QuestPassthroughThemeStyle *style,
+    XrPassthroughColorLutMETA color_lut
+) {
+    const uint32_t buffer_size =
+        QUEST_PASSTHROUGH_LUT_RESOLUTION *
+        QUEST_PASSTHROUGH_LUT_RESOLUTION *
+        QUEST_PASSTHROUGH_LUT_RESOLUTION * 3U;
+    uint8_t *buffer = malloc(buffer_size);
+    if (buffer == NULL) return false;
+    build_passthrough_color_lut(style, buffer);
+    XrPassthroughColorLutUpdateInfoMETA update_info = {
+        .type = XR_TYPE_PASSTHROUGH_COLOR_LUT_UPDATE_INFO_META,
+        .data = {
+            .bufferSize = buffer_size,
+            .buffer = buffer,
+        },
+    };
+    const XrResult result = app->update_passthrough_color_lut(
+        color_lut, &update_info);
+    free(buffer);
+    return XR_SUCCEEDED(result);
+}
+
+static void initialize_passthrough_styling(QuestApp *app) {
+    xrGetInstanceProcAddr(app->instance, "xrPassthroughLayerSetStyleFB",
+        (PFN_xrVoidFunction *)&app->set_passthrough_style);
+    app->passthrough_style_supported =
+        app->set_passthrough_style != NULL;
+    app->active_passthrough_theme =
+        (enum QuestPassthroughTheme)-1;
+    app->applied_star_pulse_weight = -1.0f;
+    app->observed_star_collection_serial =
+        quest_game_star_collection_serial();
+
+    if (!app->passthrough_style_supported ||
+        !app->passthrough_color_lut_supported) {
+        app->passthrough_color_lut_supported = false;
+        return;
+    }
+    xrGetInstanceProcAddr(app->instance, "xrCreatePassthroughColorLutMETA",
+        (PFN_xrVoidFunction *)&app->create_passthrough_color_lut);
+    xrGetInstanceProcAddr(app->instance, "xrDestroyPassthroughColorLutMETA",
+        (PFN_xrVoidFunction *)&app->destroy_passthrough_color_lut);
+    xrGetInstanceProcAddr(app->instance, "xrUpdatePassthroughColorLutMETA",
+        (PFN_xrVoidFunction *)&app->update_passthrough_color_lut);
+    app->passthrough_color_lut_supported =
+        app->create_passthrough_color_lut != NULL &&
+        app->destroy_passthrough_color_lut != NULL &&
+        app->update_passthrough_color_lut != NULL;
+    if (!app->passthrough_color_lut_supported) return;
+
+    if (!create_passthrough_color_lut(
+            app,
+            passthrough_theme_style(QUEST_PASSTHROUGH_THEME_NEUTRAL),
+            &app->theme_color_lut) ||
+        !create_passthrough_color_lut(
+            app, &sStarPulseStyle, &app->star_color_lut)) {
+        if (app->theme_color_lut != XR_NULL_HANDLE) {
+            app->destroy_passthrough_color_lut(app->theme_color_lut);
+            app->theme_color_lut = XR_NULL_HANDLE;
+        }
+        if (app->star_color_lut != XR_NULL_HANDLE) {
+            app->destroy_passthrough_color_lut(app->star_color_lut);
+            app->star_color_lut = XR_NULL_HANDLE;
+        }
+        app->passthrough_color_lut_supported = false;
+        LOGI("Passthrough color LUT creation failed; using basic styling.");
+        return;
+    }
+    LOGI("Per-level passthrough color LUTs are ready.");
+}
+
+static float passthrough_star_pulse_weight(
+    QuestApp *app,
+    XrTime display_time
+) {
+    if (app->star_pulse_start_time == 0 ||
+        display_time <= app->star_pulse_start_time) {
+        return app->star_pulse_start_time == 0 ? 0.0f : 0.01f;
+    }
+    const XrDuration elapsed = display_time - app->star_pulse_start_time;
+    if (elapsed >= QUEST_STAR_PULSE_DURATION_NS) return 0.0f;
+    const float progress = (float)elapsed /
+        (float)QUEST_STAR_PULSE_DURATION_NS;
+    float weight;
+    if (progress < 0.14f) {
+        weight = progress / 0.14f;
+    } else {
+        weight = 1.0f - (progress - 0.14f) / 0.86f;
+    }
+    return weight * weight * (3.0f - 2.0f * weight);
+}
+
+static void update_passthrough_style(
+    QuestApp *app,
+    XrTime display_time
+) {
+    if (!app->passthrough_active ||
+        !app->passthrough_style_supported) return;
+
+    enum QuestPassthroughTheme theme = quest_game_passthrough_theme();
+    const QuestPassthroughThemeStyle *theme_style =
+        passthrough_theme_style(theme);
+    const bool theme_changed =
+        theme != app->active_passthrough_theme;
+    if (theme_changed && app->passthrough_color_lut_supported &&
+        !update_passthrough_color_lut(
+            app, theme_style, app->theme_color_lut)) {
+        app->passthrough_color_lut_supported = false;
+        LOGI("Passthrough LUT update failed; using basic styling.");
+    }
+    app->active_passthrough_theme = theme;
+
+    const uint32_t star_serial = quest_game_star_collection_serial();
+    if (star_serial != app->observed_star_collection_serial) {
+        app->observed_star_collection_serial = star_serial;
+        app->star_pulse_start_time = display_time;
+    }
+    const float pulse = passthrough_star_pulse_weight(app, display_time);
+    if (!theme_changed && pulse == 0.0f &&
+        app->applied_star_pulse_weight == 0.0f) return;
+
+    XrPassthroughStyleFB style = {
+        .type = XR_TYPE_PASSTHROUGH_STYLE_FB,
+        .textureOpacityFactor = 1.0f,
+        .edgeColor = {
+            theme_style->edge_color.r +
+                (sStarPulseStyle.edge_color.r - theme_style->edge_color.r) * pulse,
+            theme_style->edge_color.g +
+                (sStarPulseStyle.edge_color.g - theme_style->edge_color.g) * pulse,
+            theme_style->edge_color.b +
+                (sStarPulseStyle.edge_color.b - theme_style->edge_color.b) * pulse,
+            theme_style->edge_color.a +
+                (sStarPulseStyle.edge_color.a - theme_style->edge_color.a) * pulse,
+        },
+    };
+    XrPassthroughColorMapInterpolatedLutMETA lut_map = {
+        .type = XR_TYPE_PASSTHROUGH_COLOR_MAP_INTERPOLATED_LUT_META,
+        .sourceColorLut = app->theme_color_lut,
+        .targetColorLut = app->star_color_lut,
+        .weight = pulse,
+    };
+    XrPassthroughBrightnessContrastSaturationFB adjustment = {
+        .type = XR_TYPE_PASSTHROUGH_BRIGHTNESS_CONTRAST_SATURATION_FB,
+        .brightness = (theme_style->brightness +
+            (sStarPulseStyle.brightness - theme_style->brightness) * pulse) * 100.0f,
+        .contrast = 1.0f + theme_style->contrast +
+            (sStarPulseStyle.contrast - theme_style->contrast) * pulse,
+        .saturation = theme_style->saturation +
+            (sStarPulseStyle.saturation - theme_style->saturation) * pulse,
+    };
+    style.next = app->passthrough_color_lut_supported
+        ? (const void *)&lut_map
+        : (const void *)&adjustment;
+    const XrResult result = app->set_passthrough_style(
+        app->passthrough_layer, &style);
+    if (XR_FAILED(result)) {
+        LOGI("Passthrough styling was rejected (%d); keeping natural passthrough.",
+             (int)result);
+        app->passthrough_style_supported = false;
+        return;
+    }
+    app->applied_star_pulse_weight = pulse;
+}
+
 static void initialize_passthrough(QuestApp *app) {
     if (!app->passthrough_supported) {
         LOGI("XR_FB_passthrough is unavailable; Tabletop will use its VR fallback.");
@@ -723,6 +1045,7 @@ static void initialize_passthrough(QuestApp *app) {
         return;
     }
     LOGI("Tabletop MR passthrough layer is ready.");
+    initialize_passthrough_styling(app);
 }
 
 static bool update_passthrough_state(QuestApp *app) {
@@ -741,6 +1064,7 @@ static bool update_passthrough_state(QuestApp *app) {
             return false;
         }
         app->passthrough_active = true;
+        app->applied_star_pulse_weight = -1.0f;
         LOGI("Tabletop MR passthrough activated.");
     } else {
         app->pause_passthrough_layer(app->passthrough_layer);
@@ -1455,6 +1779,9 @@ static bool render_frame(QuestApp *app) {
         }
         quest_game_tick();
         const bool passthrough_active = update_passthrough_state(app);
+        if (passthrough_active) {
+            update_passthrough_style(app, frame_state.predictedDisplayTime);
+        }
         projection_layer.layerFlags = passthrough_active
             ? XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT : 0;
         XrViewLocateInfo locate_info = {
@@ -1627,6 +1954,16 @@ static void destroy_quest_app(QuestApp *app) {
         && app->destroy_passthrough_layer != NULL) {
         app->destroy_passthrough_layer(app->passthrough_layer);
         app->passthrough_layer = XR_NULL_HANDLE;
+    }
+    if (app->destroy_passthrough_color_lut != NULL) {
+        if (app->theme_color_lut != XR_NULL_HANDLE) {
+            app->destroy_passthrough_color_lut(app->theme_color_lut);
+            app->theme_color_lut = XR_NULL_HANDLE;
+        }
+        if (app->star_color_lut != XR_NULL_HANDLE) {
+            app->destroy_passthrough_color_lut(app->star_color_lut);
+            app->star_color_lut = XR_NULL_HANDLE;
+        }
     }
     if (app->passthrough != XR_NULL_HANDLE
         && app->destroy_passthrough != NULL) {
