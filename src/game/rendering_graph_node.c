@@ -10,6 +10,7 @@
 #include "camera.h"
 #include "engine/math_util.h"
 #include "engine/lighting_engine.h"
+#include "engine/surface_load.h"
 #include "data/dynos_cmap.cpp.h"
 #include "data/dynos.c.h"
 #include "game_init.h"
@@ -787,7 +788,6 @@ static s8 sVrTabletopManipulationHand = -1;
 static Vec3f sVrTabletopPreviousHandPosition = { 0 };
 static Vec3f sVrTabletopGestureStartMidpoint = { 0 };
 static Vec3f sVrTabletopGestureStartCenter = { 0 };
-static Vec3f sVrTabletopGestureStartPivot = { 0 };
 static f32 sVrTabletopGestureStartDistance = 0.0f;
 static f32 sVrTabletopGestureStartAngle = 0.0f;
 static f32 sVrTabletopGestureStartScale = VR_TABLETOP_WORLD_SCALE;
@@ -3711,58 +3711,6 @@ static void vr_update_tabletop_manipulation(void) {
             sVrTabletopGestureStartAngle = handAngle;
             sVrTabletopGestureStartAngleValid =
                 horizontalDistance >= 0.10f;
-
-            // Pick the point of the miniature visually underneath the two
-            // controllers. The actual controllers are normally much closer
-            // to the user than a tabletop level, so using their raw midpoint
-            // as a pivot makes scaling push the level away. Project the
-            // midpoint ray onto a view-facing plane through the miniature's
-            // current center to obtain a stable distance-grab point instead.
-            vec3f_copy(
-                sVrTabletopGestureStartPivot,
-                sVrTabletopGestureStartCenter
-            );
-            float headPosition[3];
-            if (vr_get_head_translation(headPosition)) {
-                Vec3f planeNormal = {
-                    sVrTabletopGestureStartCenter[0] - headPosition[0],
-                    sVrTabletopGestureStartCenter[1] - headPosition[1],
-                    sVrTabletopGestureStartCenter[2] - headPosition[2]
-                };
-                Vec3f pointerDirection = {
-                    midpoint[0] - headPosition[0],
-                    midpoint[1] - headPosition[1],
-                    midpoint[2] - headPosition[2]
-                };
-                const f32 planeDistance = sqrtf(
-                    planeNormal[0] * planeNormal[0] +
-                    planeNormal[1] * planeNormal[1] +
-                    planeNormal[2] * planeNormal[2]
-                );
-                const f32 pointerDistance = sqrtf(
-                    pointerDirection[0] * pointerDirection[0] +
-                    pointerDirection[1] * pointerDirection[1] +
-                    pointerDirection[2] * pointerDirection[2]
-                );
-                if (planeDistance > 0.10f && pointerDistance > 0.10f) {
-                    for (u32 axis = 0; axis < 3; axis++) {
-                        planeNormal[axis] /= planeDistance;
-                        pointerDirection[axis] /= pointerDistance;
-                    }
-                    const f32 denominator =
-                        pointerDirection[0] * planeNormal[0] +
-                        pointerDirection[1] * planeNormal[1] +
-                        pointerDirection[2] * planeNormal[2];
-                    if (denominator > 0.10f) {
-                        const f32 rayDistance = planeDistance / denominator;
-                        for (u32 axis = 0; axis < 3; axis++) {
-                            sVrTabletopGestureStartPivot[axis] =
-                                headPosition[axis] +
-                                pointerDirection[axis] * rayDistance;
-                        }
-                    }
-                }
-            }
         } else {
             f32 scaleRatio = 1.0f;
             if (distance > 0.05f &&
@@ -3803,35 +3751,11 @@ static void vr_update_tabletop_manipulation(void) {
                     (s16)(handAngleDelta * 32768.0f / pi);
             }
 
-            // Preserve the selected grab point while applying the complete
-            // two-hand similarity transform. Releasing and grabbing over a
-            // different part of the level deliberately selects a new pivot;
-            // the pivot never changes during one continuous gesture.
-            const f32 yawDelta =
-                (f32)(s16)(sVrTabletopWorldYaw -
-                           sVrTabletopGestureStartYaw) *
-                pi / 32768.0f;
-            const f32 cosYaw = cosf(yawDelta);
-            const f32 sinYaw = sinf(yawDelta);
-            const f32 relativeX =
-                sVrTabletopGestureStartCenter[0] -
-                sVrTabletopGestureStartPivot[0];
-            const f32 relativeY =
-                sVrTabletopGestureStartCenter[1] -
-                sVrTabletopGestureStartPivot[1];
-            const f32 relativeZ =
-                sVrTabletopGestureStartCenter[2] -
-                sVrTabletopGestureStartPivot[2];
-            Vec3f newCenter = {
-                sVrTabletopGestureStartPivot[0] +
-                    (relativeX * cosYaw + relativeZ * sinYaw) *
-                    scaleRatio,
-                sVrTabletopGestureStartPivot[1] +
-                    relativeY * scaleRatio,
-                sVrTabletopGestureStartPivot[2] +
-                    (-relativeX * sinYaw + relativeZ * cosYaw) *
-                    scaleRatio
-            };
+            // Scaling and yaw now happen around the static geometry center.
+            // Keep that center fixed in room space; only an intentional
+            // two-hand translation moves the complete tabletop.
+            Vec3f newCenter;
+            vec3f_copy(newCenter, sVrTabletopGestureStartCenter);
             for (u32 axis = 0; axis < 3; axis++) {
                 newCenter[axis] +=
                     midpoint[axis] -
@@ -3965,7 +3889,19 @@ static bool vr_build_head_view_matrix(
         if (!sVrTabletopAnchorValid ||
             sVrTabletopAnchorLevel != gCurrLevelNum ||
             sVrTabletopAnchorArea != gCurrAreaIndex) {
-            vec3f_copy(sVrTabletopAnchor, gMarioStates[0].pos);
+            Vec3f boundsMin;
+            Vec3f boundsMax;
+            if (get_static_surface_bounds(boundsMin, boundsMax)) {
+                for (u32 axis = 0; axis < 3; axis++) {
+                    sVrTabletopAnchor[axis] =
+                        (boundsMin[axis] + boundsMax[axis]) * 0.5f;
+                }
+            } else {
+                // Menus and unusual custom areas may not expose static
+                // collision. Retain the known-good gameplay fallback rather
+                // than leaving the tabletop transform uninitialized.
+                vec3f_copy(sVrTabletopAnchor, gMarioStates[0].pos);
+            }
             sVrTabletopAnchorLevel = gCurrLevelNum;
             sVrTabletopAnchorArea = gCurrAreaIndex;
             sVrTabletopAnchorValid = true;

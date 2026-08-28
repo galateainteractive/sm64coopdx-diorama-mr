@@ -34,6 +34,8 @@ extern s32 gNumStaticSurfaces;
 extern s32 gNumSOCSurfaceNodes;
 extern s32 gNumSOCSurfaces;
 
+bool get_static_surface_bounds(Vec3f boundsMin, Vec3f boundsMax);
+
 #define SURFACE_POOL_STATIC  0
 #define SURFACE_POOL_DYNAMIC 1
 #define SURFACE_POOL_SOC     2

@@ -1,4 +1,5 @@
 #include <PR/ultratypes.h>
+#include <float.h>
 
 #include "prevent_bss_reordering.h"
 
@@ -83,6 +84,41 @@ static u32 sSOCIdCounter = 0;
  * When true, add_surface skips firing HOOK_ON_ADD_SURFACE.
  */
 static bool sSkipAddSurfaceHook = false;
+
+bool get_static_surface_bounds(Vec3f boundsMin, Vec3f boundsMax) {
+    if (boundsMin == NULL || boundsMax == NULL ||
+        sSurfaceStaticPool == NULL ||
+        sSurfaceStaticPool->count == 0) {
+        return false;
+    }
+
+    vec3f_set(boundsMin, FLT_MAX, FLT_MAX, FLT_MAX);
+    vec3f_set(boundsMax, -FLT_MAX, -FLT_MAX, -FLT_MAX);
+    bool found = false;
+    for (u32 index = 0; index < sSurfaceStaticPool->count; index++) {
+        struct Surface *surface = sSurfaceStaticPool->buffer[index];
+        if (surface == NULL) continue;
+        const Vec3s *vertices[3] = {
+            &surface->vertex1,
+            &surface->vertex2,
+            &surface->vertex3
+        };
+        for (u32 vertexIndex = 0; vertexIndex < 3; vertexIndex++) {
+            for (u32 axis = 0; axis < 3; axis++) {
+                boundsMin[axis] = fminf(
+                    boundsMin[axis],
+                    (f32)(*vertices[vertexIndex])[axis]
+                );
+                boundsMax[axis] = fmaxf(
+                    boundsMax[axis],
+                    (f32)(*vertices[vertexIndex])[axis]
+                );
+            }
+        }
+        found = true;
+    }
+    return found;
+}
 
 /**
  * Custom free function for StaticObjectCollision entries.
