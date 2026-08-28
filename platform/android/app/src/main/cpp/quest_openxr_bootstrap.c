@@ -34,7 +34,7 @@ extern void quest_vr_bridge_update_views(
 #define QUEST_VIEW_COUNT 2U
 #define QUEST_DEFAULT_RENDER_SCALE_PERCENT 80U
 #define QUEST_PASSTHROUGH_LUT_RESOLUTION 32U
-#define QUEST_STAR_PULSE_DURATION_NS 1600000000LL
+#define QUEST_STAR_PULSE_DURATION_NS 2200000000LL
 
 typedef struct QuestPassthroughThemeStyle {
     float tint[3];
@@ -51,41 +51,41 @@ static const QuestPassthroughThemeStyle sPassthroughThemeStyles[] = {
         {0.80f, 0.85f, 1.00f, 0.05f},
     },
     [QUEST_PASSTHROUGH_THEME_GRASS] = {
-        {0.80f, 1.22f, 0.76f}, 0.28f, 0.01f, 0.04f, 1.08f,
-        {0.30f, 1.00f, 0.35f, 0.12f},
+        {0.48f, 1.48f, 0.42f}, 0.66f, 0.01f, 0.08f, 1.24f,
+        {0.18f, 1.00f, 0.22f, 0.32f},
     },
     [QUEST_PASSTHROUGH_THEME_WATER] = {
-        {0.68f, 1.02f, 1.34f}, 0.36f, -0.01f, 0.05f, 1.04f,
-        {0.20f, 0.72f, 1.00f, 0.16f},
+        {0.34f, 0.82f, 1.62f}, 0.74f, -0.02f, 0.11f, 1.20f,
+        {0.08f, 0.58f, 1.00f, 0.40f},
     },
     [QUEST_PASSTHROUGH_THEME_SNOW] = {
-        {0.88f, 1.03f, 1.22f}, 0.22f, 0.05f, 0.02f, 0.88f,
-        {0.70f, 0.90f, 1.00f, 0.12f},
+        {0.64f, 1.02f, 1.48f}, 0.56f, 0.08f, 0.06f, 0.92f,
+        {0.58f, 0.86f, 1.00f, 0.30f},
     },
     [QUEST_PASSTHROUGH_THEME_SKY] = {
-        {0.72f, 0.94f, 1.32f}, 0.34f, 0.02f, 0.04f, 1.02f,
-        {0.32f, 0.68f, 1.00f, 0.15f},
+        {0.38f, 0.76f, 1.62f}, 0.70f, 0.02f, 0.09f, 1.18f,
+        {0.16f, 0.54f, 1.00f, 0.38f},
     },
     [QUEST_PASSTHROUGH_THEME_FIRE] = {
-        {1.38f, 0.66f, 0.48f}, 0.46f, -0.01f, 0.10f, 1.12f,
-        {1.00f, 0.18f, 0.04f, 0.22f},
+        {1.78f, 0.30f, 0.16f}, 0.84f, -0.02f, 0.17f, 1.32f,
+        {1.00f, 0.08f, 0.01f, 0.52f},
     },
     [QUEST_PASSTHROUGH_THEME_CAVE] = {
-        {0.80f, 0.72f, 1.16f}, 0.30f, -0.06f, 0.12f, 0.82f,
-        {0.52f, 0.32f, 0.92f, 0.14f},
+        {0.54f, 0.36f, 1.30f}, 0.66f, -0.10f, 0.18f, 0.88f,
+        {0.44f, 0.18f, 1.00f, 0.38f},
     },
     [QUEST_PASSTHROUGH_THEME_DESERT] = {
-        {1.28f, 1.02f, 0.64f}, 0.38f, 0.03f, 0.06f, 1.04f,
-        {1.00f, 0.72f, 0.18f, 0.15f},
+        {1.58f, 0.92f, 0.28f}, 0.72f, 0.04f, 0.12f, 1.20f,
+        {1.00f, 0.60f, 0.06f, 0.38f},
     },
     [QUEST_PASSTHROUGH_THEME_SPOOKY] = {
-        {0.84f, 0.58f, 1.22f}, 0.42f, -0.05f, 0.14f, 0.76f,
-        {0.72f, 0.18f, 1.00f, 0.20f},
+        {1.18f, 0.24f, 1.58f}, 0.78f, -0.07f, 0.20f, 0.92f,
+        {0.78f, 0.06f, 1.00f, 0.48f},
     },
 };
 
 static const QuestPassthroughThemeStyle sStarPulseStyle = {
-    {1.42f, 1.12f, 0.34f}, 0.72f, 0.12f, 0.16f, 1.18f,
+    {1.82f, 1.28f, 0.04f}, 0.96f, 0.18f, 0.24f, 1.38f,
     {1.00f, 0.78f, 0.08f, 0.95f},
 };
 
@@ -754,6 +754,20 @@ static const QuestPassthroughThemeStyle *passthrough_theme_style(
     return &sPassthroughThemeStyles[theme];
 }
 
+static const char *passthrough_theme_name(
+    enum QuestPassthroughTheme theme
+) {
+    static const char *names[] = {
+        "neutral", "grass", "water", "snow", "sky",
+        "fire", "cave", "desert", "spooky",
+    };
+    if (theme < QUEST_PASSTHROUGH_THEME_NEUTRAL ||
+        theme > QUEST_PASSTHROUGH_THEME_SPOOKY) {
+        return "unknown";
+    }
+    return names[theme];
+}
+
 static void build_passthrough_color_lut(
     const QuestPassthroughThemeStyle *style,
     uint8_t *buffer
@@ -852,6 +866,10 @@ static void initialize_passthrough_styling(QuestApp *app) {
 
     if (!app->passthrough_style_supported ||
         !app->passthrough_color_lut_supported) {
+        LOGI("Passthrough styling path: %s.",
+             app->passthrough_style_supported
+                 ? "basic brightness/contrast/saturation (META color LUT unavailable)"
+                 : "natural passthrough (style API unavailable)");
         app->passthrough_color_lut_supported = false;
         return;
     }
@@ -885,7 +903,7 @@ static void initialize_passthrough_styling(QuestApp *app) {
         LOGI("Passthrough color LUT creation failed; using basic styling.");
         return;
     }
-    LOGI("Per-level passthrough color LUTs are ready.");
+    LOGI("Passthrough styling path: advanced META color LUT.");
 }
 
 static float passthrough_star_pulse_weight(
@@ -921,6 +939,11 @@ static void update_passthrough_style(
         passthrough_theme_style(theme);
     const bool theme_changed =
         theme != app->active_passthrough_theme;
+    if (theme_changed) {
+        LOGI("Passthrough theme: %s (%s path).",
+             passthrough_theme_name(theme),
+             app->passthrough_color_lut_supported ? "META LUT" : "basic");
+    }
     if (theme_changed && app->passthrough_color_lut_supported &&
         !update_passthrough_color_lut(
             app, theme_style, app->theme_color_lut)) {
