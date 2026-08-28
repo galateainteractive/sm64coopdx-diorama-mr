@@ -1,0 +1,73 @@
+name: Manual Windows compatibility build
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Package version label
+        required: true
+        default: dev
+
+permissions:
+  contents: write
+
+jobs:
+  windows-vr:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v5
+
+      - name: Install build tools
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: mingw64
+          update: true
+          install: >-
+            make
+            git
+            mingw-w64-x86_64-gcc
+            mingw-w64-x86_64-glew
+            mingw-w64-x86_64-openxr-sdk
+            mingw-w64-x86_64-SDL2
+            python3
+
+      - name: Build assetless Windows executable
+        run: make -j$(nproc)
+
+      - name: Stage OpenXR loader and license
+        run: |
+          cp /mingw64/bin/libopenxr_loader.dll build/us_pc/libopenxr_loader.dll
+          cp /mingw64/bin/libgcc_s_seh-1.dll build/us_pc/libgcc_s_seh-1.dll
+          cp /mingw64/bin/libstdc++-6.dll build/us_pc/libstdc++-6.dll
+          cp /mingw64/bin/libwinpthread-1.dll build/us_pc/libwinpthread-1.dll
+          cp /mingw64/share/licenses/openxr-sdk/LICENSE build/us_pc/openxr-sdk-LICENSE
+          cp /mingw64/share/licenses/gcc-libs/COPYING.LIB build/us_pc/gcc-COPYING.LIB
+          cp /mingw64/share/licenses/gcc-libs/COPYING.RUNTIME build/us_pc/gcc-COPYING.RUNTIME
+          cp /mingw64/share/licenses/gcc-libs/COPYING3 build/us_pc/gcc-COPYING3
+          cp /mingw64/share/licenses/libwinpthread/COPYING build/us_pc/libwinpthread-COPYING
+
+      - name: Select package version
+        id: version
+        shell: pwsh
+        run: |
+          if ("${{ github.ref_type }}" -eq "tag") {
+            "value=${{ github.ref_name }}" >> $env:GITHUB_OUTPUT
+          } else {
+            "value=${{ inputs.version }}" >> $env:GITHUB_OUTPUT
+          }
+
+      - name: Create player ZIP
+        shell: pwsh
+        run: ./tools/package-vr-windows.ps1 -Version "${{ steps.version.outputs.value }}"
+
+      - name: Upload player ZIP artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: SM64-Co-Op-DX-VR-Windows-${{ steps.version.outputs.value }}
+          path: dist/*.zip
+          if-no-files-found: error

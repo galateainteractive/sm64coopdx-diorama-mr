@@ -1,0 +1,266 @@
+#include <deque>
+#include "dynos.cpp.h"
+extern "C" {
+#include "engine/graph_node.h"
+}
+
+static std::deque<PackData>& DynosPacks() {
+    static std::deque<PackData> sDynosPacks;
+    return sDynosPacks;
+}
+
+static void ScanPackBinsFolder(struct PackData* aPack, const SysPath& aFolder) {
+    DIR *_PackDir = opendir(aFolder.c_str());
+    if (!_PackDir) { return; }
+
+    struct dirent *_PackEnt = NULL;
+    while ((_PackEnt = readdir(_PackDir)) != NULL) {
+        // Skip . and ..
+        if (SysPath(_PackEnt->d_name) == ".") continue;
+        if (SysPath(_PackEnt->d_name) == "..") continue;
+
+        SysPath _FileName = fstring("%s/%s", aFolder.c_str(), _PackEnt->d_name);
+        s32 length = strlen(_PackEnt->d_name);
+
+        // check for actors
+        if (length > 4 && !strncmp(&_PackEnt->d_name[length - 4], ".bin", 4)) {
+            String _ActorName = _PackEnt->d_name;
+            _ActorName[length - 4] = '\0';
+            DynOS_Actor_LoadFromBinary(aPack->mPath, _ActorName.begin(), _FileName, true);
+        }
+
+        // check for textures
+        if (length > 4 && !strncmp(&_PackEnt->d_name[length - 4], ".tex", 4)) {
+            String _TexName = _PackEnt->d_name;
+            _TexName[length - 4] = '\0';
+            DynOS_Tex_LoadFromBinary(aPack->mPath, _FileName, _TexName.begin(), true);
+        }
+    }
+    closedir(_PackDir);
+}
+
+static const void* DynOS_Pack_GetActorGeoRef(
+    const std::pair<std::string, GfxData *>& pair
+) {
+    const void* georef =
+        DynOS_Builtin_Actor_GetFromName(pair.first.c_str());
+    if (georef != NULL || pair.second == NULL ||
+        pair.second->mGeoLayouts.Count() == 0) {
+        return georef;
+    }
+
+    // The graph name stored inside the binary is authoritative. Some packs
+    // rename mario_geo.bin (or place it inside a wrapper) while retaining a
+    // valid built-in mario_geo graph, so resolving only the filename silently
+    // loads the actor but never activates the player replacement.
+    auto* geoNode = *(pair.second->mGeoLayouts.end() - 1);
+    return geoNode != NULL
+        ? DynOS_Builtin_Actor_GetFromName(geoNode->mName.begin())
+        : NULL;
+}
+
+static void ScanPackBins(struct PackData* aPack) {
+    ScanPackBinsFolder(aPack, aPack->mPath);
+
+    // Accept mod-style DynOS archives that keep generated actor binaries in
+    // PackName/actors/. Keep textures rooted at the pack itself.
+    SysPath _WrappedActorsFolder = fstring("%s/actors", aPack->mPath.c_str());
+    if (fs_sys_dir_exists(_WrappedActorsFolder.c_str())) {
+        ScanPackBinsFolder(aPack, _WrappedActorsFolder);
+    }
+}
+
+static void DynOS_Pack_ActivateActor(s32 aPackIndex, std::pair<std::string, GfxData *> &pair) {
+    const char* aActorName = pair.first.c_str();
+    GfxData* aGfxData = pair.second;
+
+    auto& geoNode = *(aGfxData->mGeoLayouts.end() - 1);
+    u32 id = 0;
+    GraphNode* graphNode = DynOS_Model_LoadGeo(&id, MODEL_POOL_PERMANENT, geoNode->mData, true);
+    if (graphNode == NULL) { return; }
+
+    const void* georef = DynOS_Pack_GetActorGeoRef(pair);
+    graphNode->georef = georef;
+
+    ActorGfx actorGfx;
+    actorGfx.mGfxData   = aGfxData;
+    actorGfx.mGraphNode = graphNode;
+    actorGfx.mPackIndex = aPackIndex;
+
+    for (const auto &vtxNode : aGfxData->mVertices) {
+        if (vtxNode->mFlags & GRAPH_EXTRA_FORCE_3D) {
+            actorGfx.mGraphNode->extraFlags |= GRAPH_EXTRA_FORCE_3D;
+            break;
+        }
+    }
+
+    DynOS_Actor_Valid(georef, actorGfx);
+}
+
+static void DynOS_Pack_DeactivateActor(s32 aPackIndex, std::pair<std::string, GfxData *> &pair) {
+    const char* aActorName = pair.first.c_str();
+    const void* georef = DynOS_Pack_GetActorGeoRef(pair);
+    DynOS_Actor_Invalid(georef, aPackIndex);
+
+    // figure out which actor to replace it with
+    std::pair<std::string, GfxData *> *_Replacement = NULL;
+    s32 _ReplacementPackIndex = 0;
+    for (auto& _Pack : DynosPacks()) {
+        if (!_Pack.mEnabled) { continue; }
+        auto _Tmp = DynOS_Pack_GetActor(&_Pack, aActorName);
+        if (_Tmp != NULL) {
+            _Replacement = _Tmp;
+            _ReplacementPackIndex = _Pack.mIndex;
+        }
+    }
+    if (_Replacement != NULL) {
+        DynOS_Pack_ActivateActor(_ReplacementPackIndex, *_Replacement);
+    }
+}
+
+s32 DynOS_Pack_GetCount() {
+    return DynosPacks().size();
+}
+
+void DynOS_Pack_SetEnabled(PackData* aPack, bool aEnabled) {
+    if (aPack == NULL) { return; }
+    aPack->mEnabled = aEnabled;
+
+    if (aEnabled && !aPack->mLoaded) {
+        ScanPackBins(aPack);
+        aPack->mLoaded = true;
+    }
+
+    if (aEnabled) {
+        for (auto& pair : aPack->mGfxData) {
+            DynOS_Pack_ActivateActor(aPack->mIndex, pair);
+        }
+        for (auto& _Tex : aPack->mTextures) {
+            DynOS_Tex_Activate(_Tex, false);
+        }
+    } else {
+        for (auto& pair : aPack->mGfxData) {
+            DynOS_Pack_DeactivateActor(aPack->mIndex, pair);
+        }
+        for (auto& _Tex : aPack->mTextures) {
+            DynOS_Tex_Deactivate(_Tex);
+        }
+    }
+    DynOS_Actor_Override_All();
+}
+
+PackData* DynOS_Pack_GetFromIndex(s32 aIndex) {
+    auto& _DynosPacks = DynosPacks();
+    if (aIndex < 0 || aIndex >= _DynosPacks.size()) {
+        return NULL;
+    }
+    return &_DynosPacks[aIndex];
+}
+
+PackData* DynOS_Pack_GetFromPath(const SysPath& aPath) {
+    for (auto& packData : DynosPacks()) {
+        if (packData.mPath == aPath) {
+            return &packData;
+        }
+    }
+    return NULL;
+}
+
+PackData* DynOS_Pack_GetFromDisplayName(const char* aDisplayName) {
+    for (auto& packData : DynosPacks()) {
+        if (!strcmp(packData.mDisplayName.begin(), aDisplayName)) {
+            return &packData;
+        }
+    }
+    return NULL;
+}
+
+PackData* DynOS_Pack_Add(const SysPath& aPath) {
+    PackData* existing = DynOS_Pack_GetFromPath(aPath);
+    if (existing != NULL) { return existing; }
+
+    // extract basename
+    const char* displayName = aPath.c_str();
+    const char* ctoken = displayName;
+    while (*ctoken != '\0') {
+        if (*ctoken == *PATH_SEPARATOR || *ctoken == *PATH_SEPARATOR_ALT) {
+            if (*(ctoken + 1) != '\0') {
+                displayName = (ctoken + 1);
+            }
+        }
+        ctoken++;
+    }
+
+    existing = DynOS_Pack_GetFromDisplayName(displayName);
+    if (existing != NULL) { return existing; }
+
+
+    auto& _DynosPacks = DynosPacks();
+    s32 index = _DynosPacks.size();
+    const PackData packData = {
+        .mIndex = index,
+        .mEnabled = false,
+        .mPath = aPath,
+        .mDisplayName = "",
+        .mGfxData = {},
+        .mTextures = {},
+        .mLoaded = false,
+    };
+    _DynosPacks.push_back(packData);
+
+    PackData* _Pack = &_DynosPacks.back();
+
+    _Pack->mDisplayName = displayName;
+
+    return _Pack;
+}
+
+std::pair<std::string, GfxData *>* DynOS_Pack_GetActor(PackData* aPackData, const char* aActorName) {
+    if (aPackData == NULL || aActorName == NULL) {
+        return NULL;
+    }
+    for (auto& pair : aPackData->mGfxData) {
+        if (pair.first == aActorName) {
+            return &pair;
+        }
+    }
+    return NULL;
+}
+
+void DynOS_Pack_AddActor(PackData* aPackData, const char* aActorName, GfxData* aGfxData) {
+    if (aPackData == NULL || aActorName == NULL || aGfxData == NULL) {
+        return;
+    }
+
+    s32 index = aPackData->mGfxData.size();
+    aPackData->mGfxData.emplace_back(aActorName, aGfxData);
+
+    if (aPackData->mEnabled) {
+        DynOS_Pack_ActivateActor(aPackData->mIndex, aPackData->mGfxData[index]);
+    }
+}
+
+DataNode<TexData>* DynOS_Pack_GetTex(PackData* aPackData, const char* aTexName) {
+    if (aPackData == NULL || aTexName == NULL) {
+        return NULL;
+    }
+
+    for (auto& _Tex : aPackData->mTextures) {
+        if (!strcmp(_Tex->mName.begin(), aTexName)) {
+            return _Tex;
+        }
+    }
+    return NULL;
+}
+
+void DynOS_Pack_AddTex(PackData* aPackData, DataNode<TexData>* aTexData) {
+    if (aPackData == NULL || aTexData == NULL) {
+        return;
+    }
+
+    aPackData->mTextures.push_back(aTexData);
+
+    if (aPackData->mEnabled) {
+        DynOS_Tex_Activate(aTexData, false);
+    }
+}

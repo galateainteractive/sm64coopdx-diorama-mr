@@ -1,0 +1,347 @@
+#include <stdio.h>
+
+#include "pc/configfile.h"
+#include "pc/vr/vr.h"
+#include "pc/vr/vr_openxr.h"
+
+static bool sVrActive = false;
+static bool sGraphicsReady = false;
+static float sRenderTargetAspect = 0.0f;
+static bool sPhysicalPunchPending[VR_CONTROLLER_COUNT] = {
+    false,
+    false
+};
+
+static void vr_clear_physical_punches(void) {
+    for (uint32_t hand = 0;
+         hand < VR_CONTROLLER_COUNT;
+         hand++) {
+        sPhysicalPunchPending[hand] = false;
+    }
+}
+
+void vr_init(void) {
+    printf("[VR] VR subsystem initialized.\n");
+    printf("[VR] Launch in VR setting: %s\n",
+           configVrAutoStart ? "ON" : "OFF");
+
+    vr_set_active(configVrAutoStart);
+}
+
+static bool vr_start_graphics_session(void) {
+    if (!sGraphicsReady) {
+        return true;
+    }
+
+    if (configGraphicsBackend != GAPI_GL) {
+        printf(
+            "[VR] VR currently requires the "
+            "OpenGL graphics backend.\n"
+        );
+
+        return false;
+    }
+
+    if (!vr_openxr_create_session()) {
+        return false;
+    }
+
+    return true;
+}
+
+void vr_on_graphics_ready(void) {
+    sGraphicsReady = true;
+
+    printf("[VR] Game graphics context is ready.\n");
+
+    if (!sVrActive) {
+        return;
+    }
+
+    if (!vr_start_graphics_session()) {
+        printf(
+            "[VR] Could not attach VR to the "
+            "game graphics context.\n"
+        );
+
+        vr_openxr_shutdown();
+
+        sVrActive = false;
+
+        printf("[VR] VR mode state: OFF\n");
+    }
+}
+
+static void vr_handle_openxr_failure(void) {
+    printf(
+        "[VR] OpenXR stopped unexpectedly. "
+        "Returning to flat mode.\n"
+    );
+
+    vr_openxr_shutdown();
+    sRenderTargetAspect = 0.0f;
+    sVrActive = false;
+
+    printf("[VR] VR mode state: OFF\n");
+}
+
+void vr_begin_frame(void) {
+    // A motion gesture is consumed during the following game update. Never
+    // carry one across unrelated render/game frames (for example, from a
+    // menu into a level).
+    vr_clear_physical_punches();
+
+    if (!sVrActive) {
+        return;
+    }
+
+    if (!vr_openxr_begin_frame()) {
+        vr_handle_openxr_failure();
+    }
+}
+
+void vr_end_frame(void) {
+    if (!sVrActive) {
+        return;
+    }
+
+    if (!vr_openxr_end_frame()) {
+        vr_handle_openxr_failure();
+    }
+}
+
+bool vr_begin_eye(
+    uint32_t eyeIndex,
+    uint32_t* width,
+    uint32_t* height
+) {
+    if (!sVrActive ||
+        !vr_openxr_begin_eye(eyeIndex, width, height)) {
+        return false;
+    }
+
+    sRenderTargetAspect =
+        (float)*width / (float)*height;
+    return true;
+}
+
+bool vr_end_eye(uint32_t eyeIndex) {
+    if (!sVrActive) {
+        return false;
+    }
+
+    const bool ended = vr_openxr_end_eye(eyeIndex);
+    sRenderTargetAspect = 0.0f;
+    return ended;
+}
+
+bool vr_mirror_eye(
+    uint32_t eyeIndex,
+    uint32_t width,
+    uint32_t height
+) {
+    if (!sVrActive) {
+        return false;
+    }
+
+    return vr_openxr_mirror_eye(
+        eyeIndex,
+        width,
+        height
+    );
+}
+
+bool vr_get_render_target_aspect(float* aspect) {
+    if (!sVrActive ||
+        aspect == NULL ||
+        sRenderTargetAspect <= 0.0f) {
+        return false;
+    }
+
+    *aspect = sRenderTargetAspect;
+    return true;
+}
+
+bool vr_get_eye_offset(uint32_t eyeIndex, float offset[3]) {
+    if (!sVrActive || offset == NULL) {
+        return false;
+    }
+
+    return vr_openxr_get_eye_offset(eyeIndex, offset);
+}
+
+bool vr_get_eye_fov(uint32_t eyeIndex, float fov[4]) {
+    if (!sVrActive || fov == NULL) {
+        return false;
+    }
+
+    return vr_openxr_get_eye_fov(eyeIndex, fov);
+}
+
+bool vr_get_head_rotation(float rotation[4]) {
+    if (!sVrActive || rotation == NULL) {
+        return false;
+    }
+
+    return vr_openxr_get_head_rotation(rotation);
+}
+
+bool vr_get_head_translation(float translation[3]) {
+    if (!sVrActive || translation == NULL) {
+        return false;
+    }
+
+    return vr_openxr_get_head_translation(translation);
+}
+
+bool vr_get_calibrated_head_height(float* height) {
+    if (!sVrActive || height == NULL) {
+        return false;
+    }
+
+    return vr_openxr_get_calibrated_head_height(height);
+}
+
+uint32_t vr_get_tracking_origin_generation(void) {
+    return vr_openxr_get_tracking_origin_generation();
+}
+
+bool vr_get_controller_state(
+    uint32_t handIndex,
+    struct VrControllerState* state
+) {
+    if (!sVrActive || state == NULL) {
+        return false;
+    }
+
+    return vr_openxr_get_controller_state(handIndex, state);
+}
+
+bool vr_apply_haptic(
+    uint32_t handIndex,
+    float amplitude,
+    float durationSeconds,
+    float frequency
+) {
+    if (!sVrActive) {
+        return false;
+    }
+
+    return vr_openxr_apply_haptic(
+        handIndex,
+        amplitude,
+        durationSeconds,
+        frequency
+    );
+}
+
+void vr_queue_physical_punch(uint32_t handIndex) {
+    if (sVrActive && handIndex < VR_CONTROLLER_COUNT) {
+        sPhysicalPunchPending[handIndex] = true;
+    }
+}
+
+bool vr_consume_physical_punch(uint32_t handIndex) {
+    if (!sVrActive || handIndex >= VR_CONTROLLER_COUNT) {
+        return false;
+    }
+
+    const bool pending = sPhysicalPunchPending[handIndex];
+    sPhysicalPunchPending[handIndex] = false;
+    return pending;
+}
+
+void vr_shutdown(void) {
+    vr_openxr_shutdown();
+
+    vr_clear_physical_punches();
+    sGraphicsReady = false;
+    sRenderTargetAspect = 0.0f;
+    sVrActive = false;
+
+    printf("[VR] VR subsystem shut down.\n");
+}
+
+bool vr_is_active(void) {
+    return sVrActive;
+}
+
+bool vr_set_active(bool active) {
+    if (!active) {
+        vr_openxr_shutdown();
+
+        vr_clear_physical_punches();
+        sRenderTargetAspect = 0.0f;
+        sVrActive = false;
+
+        printf("[VR] VR mode state: OFF\n");
+
+        return true;
+    }
+
+    if (sVrActive) {
+        printf("[VR] VR mode state: ON\n");
+        return true;
+    }
+
+    printf(
+        "[VR] Starting persistent "
+        "OpenXR context...\n"
+    );
+
+    if (!vr_openxr_startup()) {
+        sVrActive = false;
+
+        printf(
+            "[VR] VR activation failed. "
+            "Staying in flat mode.\n"
+        );
+
+        printf("[VR] VR mode state: OFF\n");
+
+        return false;
+    }
+
+    sVrActive = true;
+
+    if (!vr_start_graphics_session()) {
+        vr_openxr_shutdown();
+
+        sVrActive = false;
+
+        printf(
+            "[VR] VR graphics session could "
+            "not be created.\n"
+        );
+
+        printf("[VR] VR mode state: OFF\n");
+
+        return false;
+    }
+
+    // Establish the application's neutral headset height and yaw from the
+    // first valid pose after OpenXR reaches FOCUSED. Valid poses can arrive
+    // earlier while the headset is still waking, which previously left a
+    // stale vertical offset until the player used the runtime's recenter.
+    vr_request_recenter();
+
+    printf("[VR] VR mode state: ON\n");
+
+    return true;
+}
+
+void vr_request_recenter(void) {
+    if (!sVrActive) {
+        return;
+    }
+
+    vr_openxr_request_recenter();
+}
+
+void vr_request_horizontal_recenter(void) {
+    if (!sVrActive) {
+        return;
+    }
+
+    vr_openxr_request_horizontal_recenter();
+}

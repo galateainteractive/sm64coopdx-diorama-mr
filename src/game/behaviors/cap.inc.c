@@ -1,0 +1,361 @@
+// cap.c.inc
+
+static struct ObjectHitbox sCapHitbox = {
+    .interactType = INTERACT_CAP,
+    .downOffset = 0,
+    .damageOrCoinValue = 0,
+    .health = 0,
+    .numLootCoins = 0,
+    .radius = 80,
+    .height = 80,
+    .hurtboxRadius = 90,
+    .hurtboxHeight = 90,
+};
+
+s32 cap_set_hitbox(void) {
+    obj_set_hitbox(o, &sCapHitbox);
+    if (o->oInteractStatus & INT_STATUS_INTERACTED) {
+        o->activeFlags = ACTIVE_FLAG_DEACTIVATED;
+        o->oInteractStatus = 0;
+        return 1;
+    }
+
+    return 0;
+}
+
+void cap_despawn(void) {
+    if (o->oTimer > 300) {
+        obj_flicker_and_disappear(o, 300);
+    }
+}
+
+void cap_check_quicksand(void) {
+    if (sObjFloor == NULL)
+        return;
+
+    switch (sObjFloor->type) {
+        case SURFACE_DEATH_PLANE:
+            o->activeFlags = ACTIVE_FLAG_DEACTIVATED;
+            break;
+
+        case SURFACE_SHALLOW_QUICKSAND:
+        case SURFACE_DEEP_QUICKSAND:
+        case SURFACE_QUICKSAND:
+            o->oAction = 10;
+            o->oForwardVel = 0.0f;
+            break;
+
+        case SURFACE_DEEP_MOVING_QUICKSAND:
+        case SURFACE_SHALLOW_MOVING_QUICKSAND:
+        case SURFACE_MOVING_QUICKSAND:
+            o->oAction = 11;
+            o->oMoveAngleYaw = (sObjFloor->force & 0xFF) << 8;
+            o->oForwardVel = 8 + 2 * (0 - ((sObjFloor->force & 0xFF00) >> 8));
+            break;
+
+        case SURFACE_INSTANT_QUICKSAND:
+            o->oAction = 12;
+            o->oForwardVel = 0.0f;
+            break;
+
+        case SURFACE_INSTANT_MOVING_QUICKSAND:
+            o->oAction = 13;
+            o->oMoveAngleYaw = (sObjFloor->force & 0xFF) << 8;
+            o->oForwardVel = 8 + 2 * (0 - ((sObjFloor->force & 0xFF00) >> 8));
+            break;
+    }
+}
+
+void cap_sink_quicksand(void) {
+    switch (o->oAction) {
+        case 10:
+            if (o->oTimer < 10) {
+                o->oGraphYOffset += -1.0f;
+                o->oFaceAnglePitch = 0x2000;
+            }
+            break;
+
+        case 11:
+            if (o->oTimer < 10)
+                o->oGraphYOffset += -3.0f;
+
+            o->oFaceAnglePitch = 0x2000;
+            break;
+
+        case 12:
+            o->oGraphYOffset += -1.0f;
+            if (o->oTimer >= 21)
+                o->activeFlags = ACTIVE_FLAG_DEACTIVATED;
+
+            break;
+
+        case 13:
+            o->oGraphYOffset += -6.0f;
+            if (o->oTimer >= 21)
+                o->activeFlags = ACTIVE_FLAG_DEACTIVATED;
+
+            o->oFaceAnglePitch = 0x2000;
+            break;
+    }
+
+    cap_check_quicksand();
+}
+
+void bhv_wing_cap_init(void) {
+    if (o->oBehParams2ndByte == VR_PAINTING_EXIT_HAT_BEH_PARAM) {
+        o->oGravity = 0.0f;
+        o->oFriction = 1.0f;
+        o->oBuoyancy = 0.0f;
+        o->oOpacity = 255;
+        o->oInteractType = 0;
+        o->oIntangibleTimer = -1;
+        return;
+    }
+    o->oGravity = 1.2f;
+    o->oFriction = 0.999f;
+    o->oBuoyancy = 0.9f;
+    o->oOpacity = 255;
+}
+
+void cap_scale_vertically(void) {
+    o->oCapUnkF8 += 0x2000;
+    o->header.gfx.scale[1] = coss(o->oCapUnkF8) * 0.3 + 0.7;
+    if (o->oCapUnkF8 == 0x10000) {
+        o->oCapUnkF8 = 0;
+        o->oCapUnkF4 = 2;
+    }
+}
+
+void wing_vanish_cap_act_0(void) {
+    s16 sp1E;
+
+    o->oFaceAngleYaw += o->oForwardVel * 128.0f;
+    sp1E = object_step();
+    if (sp1E & 0x01) {
+        cap_check_quicksand();
+        if (o->oVelY != 0.0f) {
+            o->oCapUnkF4 = 1;
+            o->oVelY = 0.0f;
+        }
+    }
+
+    if (o->oCapUnkF4 == 1)
+        cap_scale_vertically();
+}
+
+void bhv_wing_vanish_cap_loop(void) {
+    if (o->oBehParams2ndByte == VR_PAINTING_EXIT_HAT_BEH_PARAM) {
+        // A shaken Wing Cap that is thrown instead of worn escapes under its
+        // own lift. It retains the horizontal hand throw, ignores gravity and
+        // collision, and vanishes after fifteen gameplay seconds.
+        o->oInteractType = 0;
+        o->oInteractionSubtype = 0;
+        o->oInteractStatus = 0;
+        o->oIntangibleTimer = -1;
+        o->oPosX += sins(o->oMoveAngleYaw) * o->oForwardVel;
+        o->oPosY += o->oVelY;
+        o->oPosZ += coss(o->oMoveAngleYaw) * o->oForwardVel;
+        o->oVelY = approach_f32_symmetric(o->oVelY, 4.0f, 0.08f);
+        o->oFaceAngleYaw += 0x500;
+        o->oFaceAnglePitch += 0x180;
+
+        if (o->oTimer >= 420) {
+            o->oOpacity = (u8)clamp(
+                255 - (o->oTimer - 420) * 255 / 30,
+                0,
+                255
+            );
+        }
+        if (o->oTimer >= 450) {
+            o->activeFlags = ACTIVE_FLAG_DEACTIVATED;
+        }
+        return;
+    }
+
+    switch (o->oAction) {
+        case 0:
+            wing_vanish_cap_act_0();
+            break;
+
+        default:
+            object_step();
+            cap_sink_quicksand();
+            break;
+    }
+
+    if (o->oTimer > 20)
+        cur_obj_become_tangible();
+
+    cap_despawn();
+    cap_set_hitbox();
+}
+
+void bhv_metal_cap_init(void) {
+    o->oGravity = 2.4f;
+    o->oFriction = 0.999f;
+    o->oBuoyancy = 1.5f;
+    o->oOpacity = 0xFF;
+}
+
+void metal_cap_act_0(void) {
+    s16 sp1E;
+
+    o->oFaceAngleYaw += o->oForwardVel * 128.0f;
+    sp1E = object_step();
+    if (sp1E & 0x01)
+        cap_check_quicksand();
+}
+
+void bhv_metal_cap_loop(void) {
+    switch (o->oAction) {
+        case 0:
+            metal_cap_act_0();
+            break;
+
+        default:
+            object_step();
+            cap_sink_quicksand();
+            break;
+    }
+
+    if (o->oTimer > 20)
+        cur_obj_become_tangible();
+
+    cap_set_hitbox();
+    cap_despawn();
+}
+
+void bhv_normal_cap_init(void) {
+    o->oGravity = 0.7f;
+    o->oFriction = 0.89f;
+    o->oBuoyancy = 0.9f;
+    o->oOpacity = 0xFF;
+}
+
+#define VR_PAINTING_EXIT_HAT_GROUND_FRAMES 150
+#define VR_PAINTING_EXIT_HAT_GROUND_FADE_FRAMES 90
+
+struct Object* gVrPaintingExitHatObject = NULL;
+
+static void vr_painting_exit_hat_loop(void) {
+    gVrPaintingExitHatObject = o;
+    o->oInteractType = 0;
+    o->oInteractionSubtype = 0;
+    o->oInteractStatus = 0;
+    o->oIntangibleTimer = -1;
+
+    if (o->oAction == 0) {
+        o->oFaceAngleYaw += 0x400;
+        const s16 collisionFlags = object_step();
+        const f32 waterLevel = find_water_level(o->oPosX, o->oPosZ);
+        const bool reachedWater =
+            waterLevel > FLOOR_LOWER_LIMIT &&
+            o->oPosY <= waterLevel + 5.0f;
+        if ((collisionFlags & OBJ_COL_FLAG_GROUNDED) || reachedWater) {
+            o->oForwardVel = 0.0f;
+            o->oVelY = 0.0f;
+            o->oFaceAnglePitch = 0;
+            if (reachedWater) {
+                o->oPosY = waterLevel;
+            }
+            o->oAction = 1;
+        }
+        return;
+    }
+
+    if (o->oTimer < VR_PAINTING_EXIT_HAT_GROUND_FRAMES) {
+        return;
+    }
+
+    const s32 fadeFrame = o->oTimer - VR_PAINTING_EXIT_HAT_GROUND_FRAMES;
+    if (fadeFrame >= VR_PAINTING_EXIT_HAT_GROUND_FADE_FRAMES) {
+        if (gVrPaintingExitHatObject == o) {
+            gVrPaintingExitHatObject = NULL;
+        }
+        o->activeFlags = ACTIVE_FLAG_DEACTIVATED;
+        return;
+    }
+    o->oOpacity = (u8)clamp(
+        255 - fadeFrame * 255 / VR_PAINTING_EXIT_HAT_GROUND_FADE_FRAMES,
+        0,
+        255
+    );
+    o->oAnimState = 1;
+}
+
+void normal_cap_set_save_flags(void) {
+    if (o->oBehParams - 1 != 0) { return; }
+
+    save_file_clear_flags(SAVE_FLAG_CAP_ON_GROUND);
+
+    switch (gCurrCourseNum) {
+        case COURSE_SL:
+            gMarioStates[0].cap = SAVE_FLAG_CAP_ON_MR_BLIZZARD;
+            break;
+
+        case COURSE_TTM:
+            gMarioStates[0].cap = SAVE_FLAG_CAP_ON_UKIKI;
+            break;
+
+        default:
+            gMarioStates[0].cap = SAVE_FLAG_CAP_ON_KLEPTO;
+            break;
+    }
+}
+
+void normal_cap_act_0(void) {
+    s16 sp1E;
+
+    o->oFaceAngleYaw += o->oForwardVel * 128.0f;
+    o->oFaceAnglePitch += o->oForwardVel * 80.0f;
+    sp1E = object_step();
+    if (sp1E & 0x01) {
+        cap_check_quicksand();
+
+        if (o->oVelY != 0.0f) {
+            o->oCapUnkF4 = 1;
+            o->oVelY = 0.0f;
+            o->oFaceAnglePitch = 0;
+        }
+    }
+
+    if (o->oCapUnkF4 == 1)
+        cap_scale_vertically();
+}
+
+void bhv_normal_cap_loop(void) {
+    if (o->oBehParams2ndByte == VR_PAINTING_EXIT_HAT_BEH_PARAM) {
+        vr_painting_exit_hat_loop();
+        return;
+    }
+
+    switch (o->oAction) {
+        case 0:
+            normal_cap_act_0();
+            break;
+
+        default:
+            object_step();
+            cap_sink_quicksand();
+            break;
+    }
+
+    if (o->activeFlags == ACTIVE_FLAG_DEACTIVATED)
+        normal_cap_set_save_flags();
+
+    if (cap_set_hitbox() == 1)
+        save_file_clear_flags(SAVE_FLAG_CAP_ON_GROUND);
+
+    if (o->globalPlayerIndex >= MAX_PLAYERS) {
+        o->globalPlayerIndex = 0;
+    }
+
+    obj_set_model(o, gMarioStates[network_local_index_from_global(o->globalPlayerIndex)].character->capModelId);
+}
+
+void bhv_vanish_cap_init(void) {
+    o->oGravity = 1.2f;
+    o->oFriction = 0.999f;
+    o->oBuoyancy = 0.9f;
+    o->oOpacity = 150;
+}
