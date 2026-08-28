@@ -324,7 +324,9 @@ bool quest_game_initialize(void) {
     // exposing desktop-mirror behavior that cannot exist here.
     configVrAutoStart = true;
     configVrDesktopMirror = false;
-    configVrCameraMode = VR_CAMERA_MODE_FIRST_PERSON;
+    if (configVrCameraMode >= VR_CAMERA_MODE_COUNT) {
+        configVrCameraMode = VR_CAMERA_MODE_FIRST_PERSON;
+    }
     configSkipIntro = true;
     // OpenXR owns presentation timing on standalone. Do not add desktop
     // VSync or a software frame limiter on top of the headset compositor.
@@ -372,6 +374,11 @@ bool quest_game_initialize(void) {
 }
 
 bool quest_game_is_ready(void) { return sReady; }
+
+bool quest_game_tabletop_mr_requested(void) {
+    return sReady && vr_is_active()
+        && configVrCameraMode == VR_CAMERA_MODE_TABLETOP;
+}
 
 void quest_game_prepare_vr_frame(void) {
     if (!sReady || !sCompletedGameTick) return;

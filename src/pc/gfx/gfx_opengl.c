@@ -1472,7 +1472,9 @@ static void gfx_opengl_start_frame(void) {
 
     glDisable(GL_SCISSOR_TEST);
     glDepthMask(GL_TRUE); // Must be set to clear Z-buffer
-    glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+    const bool tabletop = vr_is_active()
+        && configVrCameraMode == VR_CAMERA_MODE_TABLETOP;
+    glClearColor(0.0f, 0.0f, 0.0f, tabletop ? 0.0f : 1.0f);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
     glEnable(GL_SCISSOR_TEST);
 }

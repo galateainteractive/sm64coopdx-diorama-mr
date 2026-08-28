@@ -5,6 +5,7 @@
 #include <GLES3/gl31.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
@@ -74,6 +75,9 @@ typedef struct QuestApp {
     bool foveation_supported;
     bool performance_settings_supported;
     bool display_refresh_rate_supported;
+    bool passthrough_supported;
+    bool passthrough_active;
+    bool render_model_supported;
     char system_name[XR_MAX_SYSTEM_NAME_SIZE];
     XrFoveationProfileFB foveation_profiles[3];
     unsigned int active_foveation_profile;
@@ -85,6 +89,19 @@ typedef struct QuestApp {
     PFN_xrEnumerateDisplayRefreshRatesFB enumerate_refresh_rates;
     PFN_xrGetDisplayRefreshRateFB get_refresh_rate;
     PFN_xrRequestDisplayRefreshRateFB request_refresh_rate;
+    XrPassthroughFB passthrough;
+    XrPassthroughLayerFB passthrough_layer;
+    PFN_xrCreatePassthroughFB create_passthrough;
+    PFN_xrDestroyPassthroughFB destroy_passthrough;
+    PFN_xrPassthroughStartFB start_passthrough;
+    PFN_xrPassthroughPauseFB pause_passthrough;
+    PFN_xrCreatePassthroughLayerFB create_passthrough_layer;
+    PFN_xrDestroyPassthroughLayerFB destroy_passthrough_layer;
+    PFN_xrPassthroughLayerPauseFB pause_passthrough_layer;
+    PFN_xrPassthroughLayerResumeFB resume_passthrough_layer;
+    PFN_xrEnumerateRenderModelPathsFB enumerate_render_model_paths;
+    PFN_xrGetRenderModelPropertiesFB get_render_model_properties;
+    PFN_xrLoadRenderModelFB load_render_model;
     GLuint depth_buffer;
     int32_t depth_width;
     int32_t depth_height;
@@ -393,7 +410,7 @@ static bool create_openxr_instance(QuestApp *app) {
         return false;
     }
 
-    const char *extensions[7] = {
+    const char *extensions[9] = {
         XR_KHR_ANDROID_CREATE_INSTANCE_EXTENSION_NAME,
         XR_KHR_OPENGL_ES_ENABLE_EXTENSION_NAME,
     };
@@ -422,6 +439,16 @@ static bool create_openxr_instance(QuestApp *app) {
     if (app->display_refresh_rate_supported) {
         extensions[extension_count++] =
             XR_FB_DISPLAY_REFRESH_RATE_EXTENSION_NAME;
+    }
+    app->passthrough_supported =
+        openxr_extension_available(XR_FB_PASSTHROUGH_EXTENSION_NAME);
+    if (app->passthrough_supported) {
+        extensions[extension_count++] = XR_FB_PASSTHROUGH_EXTENSION_NAME;
+    }
+    app->render_model_supported =
+        openxr_extension_available(XR_FB_RENDER_MODEL_EXTENSION_NAME);
+    if (app->render_model_supported) {
+        extensions[extension_count++] = XR_FB_RENDER_MODEL_EXTENSION_NAME;
     }
 
     XrInstanceCreateInfoAndroidKHR android_info = {
@@ -457,16 +484,25 @@ static bool create_openxr_instance(QuestApp *app) {
         return false;
     }
 
+    XrSystemPassthroughProperties2FB passthrough_properties = {
+        .type = XR_TYPE_SYSTEM_PASSTHROUGH_PROPERTIES2_FB,
+    };
     XrSystemProperties system_properties = {
         .type = XR_TYPE_SYSTEM_PROPERTIES,
+        .next = app->passthrough_supported ? &passthrough_properties : NULL,
     };
-    if (xr_check(
+    const bool got_system_properties = xr_check(
             "xrGetSystemProperties",
             xrGetSystemProperties(
-                app->instance, app->system_id, &system_properties))) {
+                app->instance, app->system_id, &system_properties));
+    if (got_system_properties) {
         snprintf(app->system_name, sizeof(app->system_name), "%s",
                  system_properties.systemName);
     }
+    app->passthrough_supported = got_system_properties
+        && app->passthrough_supported
+        && (passthrough_properties.capabilities
+            & XR_PASSTHROUGH_CAPABILITY_BIT_FB) != 0;
 
     LOGI("Quest OpenXR runtime detected: %s; system id=%llu.",
          app->system_name[0] != '\0' ? app->system_name : "unknown headset",
@@ -623,6 +659,214 @@ static XrFoveationProfileFB create_foveation_level_profile(
     return profile;
 }
 
+static void initialize_passthrough(QuestApp *app) {
+    if (!app->passthrough_supported) {
+        LOGI("XR_FB_passthrough is unavailable; Tabletop will use its VR fallback.");
+        return;
+    }
+
+    xrGetInstanceProcAddr(app->instance, "xrCreatePassthroughFB",
+        (PFN_xrVoidFunction *)&app->create_passthrough);
+    xrGetInstanceProcAddr(app->instance, "xrDestroyPassthroughFB",
+        (PFN_xrVoidFunction *)&app->destroy_passthrough);
+    xrGetInstanceProcAddr(app->instance, "xrPassthroughStartFB",
+        (PFN_xrVoidFunction *)&app->start_passthrough);
+    xrGetInstanceProcAddr(app->instance, "xrPassthroughPauseFB",
+        (PFN_xrVoidFunction *)&app->pause_passthrough);
+    xrGetInstanceProcAddr(app->instance, "xrCreatePassthroughLayerFB",
+        (PFN_xrVoidFunction *)&app->create_passthrough_layer);
+    xrGetInstanceProcAddr(app->instance, "xrDestroyPassthroughLayerFB",
+        (PFN_xrVoidFunction *)&app->destroy_passthrough_layer);
+    xrGetInstanceProcAddr(app->instance, "xrPassthroughLayerPauseFB",
+        (PFN_xrVoidFunction *)&app->pause_passthrough_layer);
+    xrGetInstanceProcAddr(app->instance, "xrPassthroughLayerResumeFB",
+        (PFN_xrVoidFunction *)&app->resume_passthrough_layer);
+
+    app->passthrough_supported = app->create_passthrough != NULL
+        && app->destroy_passthrough != NULL
+        && app->start_passthrough != NULL
+        && app->pause_passthrough != NULL
+        && app->create_passthrough_layer != NULL
+        && app->destroy_passthrough_layer != NULL
+        && app->pause_passthrough_layer != NULL
+        && app->resume_passthrough_layer != NULL;
+    if (!app->passthrough_supported) {
+        LOGI("XR_FB_passthrough entry points are incomplete; using VR fallback.");
+        return;
+    }
+
+    XrPassthroughCreateInfoFB passthrough_info = {
+        .type = XR_TYPE_PASSTHROUGH_CREATE_INFO_FB,
+    };
+    XrResult result = app->create_passthrough(
+        app->session, &passthrough_info, &app->passthrough);
+    if (XR_FAILED(result)) {
+        LOGI("xrCreatePassthroughFB declined Tabletop MR (%d); using VR fallback.",
+             (int)result);
+        app->passthrough_supported = false;
+        return;
+    }
+
+    XrPassthroughLayerCreateInfoFB layer_info = {
+        .type = XR_TYPE_PASSTHROUGH_LAYER_CREATE_INFO_FB,
+        .passthrough = app->passthrough,
+        .purpose = XR_PASSTHROUGH_LAYER_PURPOSE_RECONSTRUCTION_FB,
+    };
+    result = app->create_passthrough_layer(
+        app->session, &layer_info, &app->passthrough_layer);
+    if (XR_FAILED(result)) {
+        LOGI("xrCreatePassthroughLayerFB declined Tabletop MR (%d); using VR fallback.",
+             (int)result);
+        app->destroy_passthrough(app->passthrough);
+        app->passthrough = XR_NULL_HANDLE;
+        app->passthrough_supported = false;
+        return;
+    }
+    LOGI("Tabletop MR passthrough layer is ready.");
+}
+
+static bool update_passthrough_state(QuestApp *app) {
+    const bool requested = app->passthrough_supported
+        && quest_game_tabletop_mr_requested();
+    if (requested == app->passthrough_active) return app->passthrough_active;
+
+    if (requested) {
+        XrResult result = app->start_passthrough(app->passthrough);
+        if (XR_SUCCEEDED(result)) {
+            result = app->resume_passthrough_layer(app->passthrough_layer);
+        }
+        if (XR_FAILED(result)) {
+            app->pause_passthrough(app->passthrough);
+            LOGI("Could not activate Tabletop MR passthrough (%d).", (int)result);
+            return false;
+        }
+        app->passthrough_active = true;
+        LOGI("Tabletop MR passthrough activated.");
+    } else {
+        app->pause_passthrough_layer(app->passthrough_layer);
+        app->pause_passthrough(app->passthrough);
+        app->passthrough_active = false;
+        LOGI("Tabletop MR passthrough paused.");
+    }
+    return app->passthrough_active;
+}
+
+static void load_controller_render_model_probe(QuestApp *app) {
+    if (!app->render_model_supported || app->session == XR_NULL_HANDLE) {
+        LOGI("OpenXR controller render models are unavailable.");
+        return;
+    }
+
+    xrGetInstanceProcAddr(app->instance, "xrEnumerateRenderModelPathsFB",
+        (PFN_xrVoidFunction *)&app->enumerate_render_model_paths);
+    xrGetInstanceProcAddr(app->instance, "xrGetRenderModelPropertiesFB",
+        (PFN_xrVoidFunction *)&app->get_render_model_properties);
+    xrGetInstanceProcAddr(app->instance, "xrLoadRenderModelFB",
+        (PFN_xrVoidFunction *)&app->load_render_model);
+    if (app->enumerate_render_model_paths == NULL ||
+        app->get_render_model_properties == NULL ||
+        app->load_render_model == NULL) {
+        app->render_model_supported = false;
+        LOGI("XR_FB_render_model entry points are unavailable.");
+        return;
+    }
+
+    uint32_t path_count = 0;
+    XrResult result = app->enumerate_render_model_paths(
+        app->session, 0, &path_count, NULL);
+    if (XR_FAILED(result) || path_count == 0) {
+        LOGI("No OpenXR render model paths were enumerated (result %d).",
+             (int)result);
+        return;
+    }
+
+    XrRenderModelPathInfoFB *paths = calloc(path_count, sizeof(*paths));
+    if (paths == NULL) return;
+    for (uint32_t i = 0; i < path_count; ++i) {
+        paths[i].type = XR_TYPE_RENDER_MODEL_PATH_INFO_FB;
+    }
+    result = app->enumerate_render_model_paths(
+        app->session, path_count, &path_count, paths);
+    if (XR_FAILED(result)) {
+        LOGI("Could not enumerate OpenXR render model paths (result %d).",
+             (int)result);
+        free(paths);
+        return;
+    }
+
+    for (uint32_t i = 0; i < path_count; ++i) {
+        char path_string[XR_MAX_PATH_LENGTH] = {0};
+        uint32_t path_length = 0;
+        if (XR_FAILED(xrPathToString(
+                app->instance, paths[i].path, sizeof(path_string),
+                &path_length, path_string))) {
+            continue;
+        }
+        if (strcmp(path_string, "/model_fb/controller/left") != 0 &&
+            strcmp(path_string, "/model_fb/controller/right") != 0) {
+            continue;
+        }
+
+        XrRenderModelCapabilitiesRequestFB capabilities = {
+            .type = XR_TYPE_RENDER_MODEL_CAPABILITIES_REQUEST_FB,
+            .flags = XR_RENDER_MODEL_SUPPORTS_GLTF_2_0_SUBSET_2_BIT_FB,
+        };
+        XrRenderModelPropertiesFB properties = {
+            .type = XR_TYPE_RENDER_MODEL_PROPERTIES_FB,
+            .next = &capabilities,
+        };
+        result = app->get_render_model_properties(
+            app->session, paths[i].path, &properties);
+        LOGI("Render model %s: result=%d name=%s version=%u flags=%llu key=%llu.",
+             path_string, (int)result, properties.modelName,
+             properties.modelVersion,
+             (unsigned long long)properties.flags,
+             (unsigned long long)properties.modelKey);
+        if (XR_FAILED(result) || properties.modelKey == 0) continue;
+
+        XrRenderModelLoadInfoFB load_info = {
+            .type = XR_TYPE_RENDER_MODEL_LOAD_INFO_FB,
+            .modelKey = properties.modelKey,
+        };
+        XrRenderModelBufferFB model_buffer = {
+            .type = XR_TYPE_RENDER_MODEL_BUFFER_FB,
+        };
+        result = app->load_render_model(
+            app->session, &load_info, &model_buffer);
+        if (XR_FAILED(result) || model_buffer.bufferCountOutput == 0) {
+            LOGI("Could not query %s GLB size (result %d).",
+                 path_string, (int)result);
+            continue;
+        }
+        model_buffer.buffer = malloc(model_buffer.bufferCountOutput);
+        if (model_buffer.buffer == NULL) continue;
+        model_buffer.bufferCapacityInput = model_buffer.bufferCountOutput;
+        result = app->load_render_model(
+            app->session, &load_info, &model_buffer);
+        if (XR_SUCCEEDED(result)) {
+            const char *side = strstr(path_string, "left") != NULL
+                ? "left" : "right";
+            char output_path[1024];
+            snprintf(output_path, sizeof(output_path),
+                "%s/controller-%s.glb",
+                app->android_app->activity->internalDataPath, side);
+            FILE *output = fopen(output_path, "wb");
+            if (output != NULL) {
+                const size_t written = fwrite(model_buffer.buffer, 1,
+                    model_buffer.bufferCountOutput, output);
+                fclose(output);
+                LOGI("Saved %s controller GLB probe: %zu/%u bytes.",
+                     side, written, model_buffer.bufferCountOutput);
+            }
+        } else {
+            LOGI("Could not load %s GLB (result %d).",
+                 path_string, (int)result);
+        }
+        free(model_buffer.buffer);
+    }
+    free(paths);
+}
+
 static bool create_openxr_session(QuestApp *app) {
     PFN_xrGetOpenGLESGraphicsRequirementsKHR get_requirements = NULL;
     if (!xr_check(
@@ -659,6 +903,8 @@ static bool create_openxr_session(QuestApp *app) {
             app->instance, &session_info, &app->session))) {
         return false;
     }
+
+    load_controller_render_model_probe(app);
 
     if (app->performance_settings_supported) {
         xrGetInstanceProcAddr(
@@ -739,6 +985,8 @@ static bool create_openxr_session(QuestApp *app) {
     if (!select_blend_mode(app)) {
         return false;
     }
+
+    initialize_passthrough(app);
 
     LOGI("OpenXR OpenGL ES session created.");
     return true;
@@ -1177,9 +1425,13 @@ static bool render_frame(QuestApp *app) {
         .viewCount = QUEST_VIEW_COUNT,
         .views = projection_views,
     };
-    const XrCompositionLayerBaseHeader *layers[1] = {
-        (const XrCompositionLayerBaseHeader *)&projection_layer,
+    XrCompositionLayerPassthroughFB passthrough_layer = {
+        .type = XR_TYPE_COMPOSITION_LAYER_PASSTHROUGH_FB,
+        .flags = XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT,
+        .space = XR_NULL_HANDLE,
+        .layerHandle = app->passthrough_layer,
     };
+    const XrCompositionLayerBaseHeader *layers[2] = {NULL, NULL};
     uint32_t layer_count = 0;
 
     if (frame_state.shouldRender) {
@@ -1202,6 +1454,9 @@ static bool render_frame(QuestApp *app) {
             fps_window_frames = 0;
         }
         quest_game_tick();
+        const bool passthrough_active = update_passthrough_state(app);
+        projection_layer.layerFlags = passthrough_active
+            ? XR_COMPOSITION_LAYER_BLEND_TEXTURE_SOURCE_ALPHA_BIT : 0;
         XrViewLocateInfo locate_info = {
             .type = XR_TYPE_VIEW_LOCATE_INFO,
             .viewConfigurationType = XR_VIEW_CONFIGURATION_TYPE_PRIMARY_STEREO,
@@ -1270,7 +1525,17 @@ static bool render_frame(QuestApp *app) {
                     app->swapchains[eye].height;
                 projection_views[eye].subImage.imageArrayIndex = 0;
             }
-            layer_count = 1;
+            if (passthrough_active) {
+                layers[0] =
+                    (const XrCompositionLayerBaseHeader *)&passthrough_layer;
+                layers[1] =
+                    (const XrCompositionLayerBaseHeader *)&projection_layer;
+                layer_count = 2;
+            } else {
+                layers[0] =
+                    (const XrCompositionLayerBaseHeader *)&projection_layer;
+                layer_count = 1;
+            }
         }
     } else {
         quest_game_pump_network();
@@ -1318,6 +1583,11 @@ static bool poll_openxr_events(QuestApp *app) {
                 LOGI("OpenXR session is running and submitting stereo frames.");
             } else if (changed->state == XR_SESSION_STATE_STOPPING
                        && app->session_running) {
+                if (app->passthrough_active) {
+                    app->pause_passthrough_layer(app->passthrough_layer);
+                    app->pause_passthrough(app->passthrough);
+                    app->passthrough_active = false;
+                }
                 if (!xr_check("xrEndSession", xrEndSession(app->session))) {
                     return false;
                 }
@@ -1352,6 +1622,16 @@ static void destroy_quest_app(QuestApp *app) {
     }
     if (app->local_space != XR_NULL_HANDLE) {
         xrDestroySpace(app->local_space);
+    }
+    if (app->passthrough_layer != XR_NULL_HANDLE
+        && app->destroy_passthrough_layer != NULL) {
+        app->destroy_passthrough_layer(app->passthrough_layer);
+        app->passthrough_layer = XR_NULL_HANDLE;
+    }
+    if (app->passthrough != XR_NULL_HANDLE
+        && app->destroy_passthrough != NULL) {
+        app->destroy_passthrough(app->passthrough);
+        app->passthrough = XR_NULL_HANDLE;
     }
     if (app->session != XR_NULL_HANDLE) {
         xrDestroySession(app->session);

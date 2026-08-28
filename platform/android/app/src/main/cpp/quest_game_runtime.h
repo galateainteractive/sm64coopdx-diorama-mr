@@ -15,3 +15,4 @@ void quest_game_pump_network(void);
 bool quest_game_render_eye(uint32_t eye, uint32_t width, uint32_t height);
 void quest_game_prepare_vr_frame(void);
 bool quest_game_is_ready(void);
+bool quest_game_tabletop_mr_requested(void);

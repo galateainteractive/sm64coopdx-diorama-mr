@@ -5,7 +5,8 @@ project(sm64coopdxvr_android LANGUAGES C CXX)
 find_package(OpenXR REQUIRED CONFIG)
 
 set(SM64_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../../../..")
-set(SM64_GENERATED_ROOT "C:/vr-dev/sm64coopdx/build/us_pc")
+set(SM64_GENERATED_ROOT "${SM64_ROOT}/build/us_pc" CACHE PATH
+    "Path to the generated SM64 PC build sources")
 set(LUA_SOURCE_ROOT "${CMAKE_CURRENT_LIST_DIR}/../../../../third_party/lua-5.3.5/src")
 set(COOPNET_ANDROID_ROOT "${SM64_ROOT}/lib/coopnet/android/arm64-v8a")
 

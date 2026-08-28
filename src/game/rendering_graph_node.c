@@ -774,6 +774,27 @@ static s16 sVrCameraYawSample = 0;
 static bool sVrPendingCameraYawAlignment = false;
 static s16 sVrPendingCameraYawTarget = 0;
 static unsigned int sVrLastCameraMode = VR_CAMERA_MODE_COUNT;
+static bool sVrTabletopAnchorValid = false;
+static s16 sVrTabletopAnchorLevel = -1;
+static s16 sVrTabletopAnchorArea = -1;
+static Vec3f sVrTabletopAnchor = { 0 };
+static f32 sVrTabletopWorldScale = VR_TABLETOP_WORLD_SCALE;
+static s16 sVrTabletopWorldYaw = 0;
+static Vec3f sVrTabletopUserOffset = { 0 };
+static bool sVrTabletopGripHeld[VR_CONTROLLER_COUNT] = { false };
+static u8 sVrTabletopManipulationHands = 0;
+static s8 sVrTabletopManipulationHand = -1;
+static Vec3f sVrTabletopPreviousHandPosition = { 0 };
+static Vec3f sVrTabletopGestureStartMidpoint = { 0 };
+static Vec3f sVrTabletopGestureStartCenter = { 0 };
+static Vec3f sVrTabletopGestureStartHead = { 0 };
+static f32 sVrTabletopGestureStartDistance = 0.0f;
+static f32 sVrTabletopGestureStartAngle = 0.0f;
+static f32 sVrTabletopGestureStartScale = VR_TABLETOP_WORLD_SCALE;
+static s16 sVrTabletopGestureStartYaw = 0;
+static bool sVrTabletopGestureStartHeadValid = false;
+static bool sVrTabletopGestureStartAngleValid = false;
+static void vr_apply_tabletop_hand_space_correction(Mat4 matrix);
 static bool sVrHeadRotationMatrixValid = false;
 static float sVrHeadRotationQuaternion[4] = { 0 };
 static Mat4 sVrHeadRotationMatrix;
@@ -994,6 +1015,18 @@ void vr_handle_camera_mode_change(void) {
     }
 
     sVrLastCameraMode = cameraMode;
+    sVrTabletopAnchorValid = false;
+    sVrTabletopWorldScale = VR_TABLETOP_WORLD_SCALE;
+    sVrTabletopWorldYaw = 0;
+    vec3f_set(sVrTabletopUserOffset, 0.0f, 0.0f, 0.0f);
+    for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+        sVrTabletopGripHeld[hand] = false;
+    }
+    sVrTabletopManipulationHands = 0;
+    sVrTabletopManipulationHand = -1;
+    sVrTabletopGestureStartDistance = 0.0f;
+    sVrTabletopGestureStartAngleValid = false;
+    sVrTabletopGestureStartHeadValid = false;
     vr_reset_first_person_calibration();
 
     // Do not carry first-person smooth-turn momentum or a camera-space
@@ -1007,8 +1040,11 @@ void vr_handle_camera_mode_change(void) {
     skip_camera_interpolation();
 
     if (vr_is_active() &&
-        cameraMode == VR_CAMERA_MODE_THIRD_PERSON) {
-        // Third person is composed around Mario by the normal game camera.
+        (cameraMode == VR_CAMERA_MODE_THIRD_PERSON ||
+         cameraMode == VR_CAMERA_MODE_TABLETOP)) {
+        // Third person is composed around Mario by the normal game camera;
+        // Tabletop is composed around a fixed point in tracking space. Rebase
+        // either mode once on entry so the scene starts centered ahead.
         // Rebase the headset once on entry so a first-person room-space lean
         // or yaw offset cannot leave Mario permanently to one side.
         // Recenter horizontal room position/yaw for third person without
@@ -1526,7 +1562,8 @@ static void vr_patch_controller_hand_matrices(uint32_t eyeIndex) {
             right[2] * positionOffsetX +
             up[2] * positionOffsetY +
             backward[2] * (wristToGripOffset + positionOffsetZ);
-        if (sVrRoomscaleBodyTrackingValid) {
+        if (configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+            sVrRoomscaleBodyTrackingValid) {
             Vec3f compensation;
             vr_get_roomscale_tracking_compensation(compensation);
             matrix[3][0] -= compensation[0];
@@ -1540,7 +1577,8 @@ static void vr_patch_controller_hand_matrices(uint32_t eyeIndex) {
         // the invisible interaction point was constrained, which made hand
         // collision appear to do nothing even though contacts were detected.
         Vec3f rawWorldPosition;
-        if (vr_get_controller_world_fist_raw_from_state(
+        if (configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+            vr_get_controller_world_fist_raw_from_state(
                 hand,
                 &state,
                 rawWorldPosition,
@@ -1567,6 +1605,11 @@ static void vr_patch_controller_hand_matrices(uint32_t eyeIndex) {
                         sVrControllerCameraInverse[localAxis][2];
             }
         }
+        // Tabletop's projection cancels the gameplay camera and then scales
+        // the whole level into a miniature. Undo that level-only transform
+        // for these tracked cursors so the gloves remain full-size in the
+        // user's room instead of becoming tiny and disappearing with it.
+        vr_apply_tabletop_hand_space_correction(matrix);
         mtxf_to_mtx(fixedMatrix, matrix);
     }
 }
@@ -2848,6 +2891,89 @@ static void vr_build_game_camera_matrix(
     );
 }
 
+static void vr_build_tabletop_transform(Mat4 transform) {
+    Vec3f zeroTranslation = { 0.0f, 0.0f, 0.0f };
+    Vec3s rotation = { 0, sVrTabletopWorldYaw, 0 };
+    mtxf_rotate_zxy_and_translate(
+        transform,
+        zeroTranslation,
+        rotation
+    );
+
+    for (u32 modelAxis = 0; modelAxis < 3; modelAxis++) {
+        for (u32 worldAxis = 0; worldAxis < 3; worldAxis++) {
+            transform[modelAxis][worldAxis] *=
+                sVrTabletopWorldScale;
+        }
+    }
+
+    const Vec3f center = {
+        sVrTabletopUserOffset[0] * VR_TABLETOP_UNITS_PER_METER,
+        (-VR_TABLETOP_DOWN_METERS + sVrTabletopUserOffset[1]) *
+            VR_TABLETOP_UNITS_PER_METER,
+        (-VR_TABLETOP_FORWARD_METERS + sVrTabletopUserOffset[2]) *
+            VR_TABLETOP_UNITS_PER_METER
+    };
+    for (u32 worldAxis = 0; worldAxis < 3; worldAxis++) {
+        transform[3][worldAxis] = center[worldAxis];
+        for (u32 modelAxis = 0; modelAxis < 3; modelAxis++) {
+            transform[3][worldAxis] -=
+                sVrTabletopAnchor[modelAxis] *
+                transform[modelAxis][worldAxis];
+        }
+    }
+}
+
+s16 vr_get_tabletop_world_yaw(void) {
+    return sVrTabletopWorldYaw;
+}
+
+static void vr_apply_tabletop_hand_space_correction(Mat4 matrix) {
+    if (configVrCameraMode != VR_CAMERA_MODE_TABLETOP ||
+        sCameraNode == NULL || !sVrTabletopAnchorValid) {
+        return;
+    }
+
+    Vec3f cameraPosition;
+    Vec3f cameraFocus;
+    if (gRenderingInterpolated) {
+        delta_interpolate_vec3f(
+            cameraPosition,
+            sCameraNode->prevPos,
+            sCameraNode->pos,
+            gRenderingDelta
+        );
+        delta_interpolate_vec3f(
+            cameraFocus,
+            sCameraNode->prevFocus,
+            sCameraNode->focus,
+            gRenderingDelta
+        );
+    } else {
+        vec3f_copy(cameraPosition, sCameraNode->pos);
+        vec3f_copy(cameraFocus, sCameraNode->focus);
+    }
+
+    Mat4 gameCamera;
+    Mat4 inverseGameCamera;
+    Mat4 tabletopTransform;
+    Mat4 cameraToTabletop;
+    Mat4 correction;
+    Mat4 correctedMatrix;
+    vr_build_game_camera_matrix(
+        gameCamera,
+        cameraPosition,
+        cameraFocus,
+        sCameraNode->roll
+    );
+    mtxf_inverse(inverseGameCamera, gameCamera);
+    vr_build_tabletop_transform(tabletopTransform);
+    mtxf_mul(cameraToTabletop, inverseGameCamera, tabletopTransform);
+    mtxf_inverse(correction, cameraToTabletop);
+    mtxf_mul(correctedMatrix, matrix, correction);
+    mtxf_copy(matrix, correctedMatrix);
+}
+
 static bool vr_calculate_stabilized_headset_world_position(
     Vec3f worldPosition
 ) {
@@ -3519,6 +3645,187 @@ static bool vr_get_ui_plane_ndc(
     return *halfWidth > 0.000001f && *halfHeight > 0.000001f;
 }
 
+static void vr_update_tabletop_manipulation(void) {
+    struct VrControllerState states[VR_CONTROLLER_COUNT] = { 0 };
+    bool poseValid[VR_CONTROLLER_COUNT] = { false };
+    u8 heldCount = 0;
+    s8 heldHand = -1;
+
+    for (u32 hand = 0; hand < VR_CONTROLLER_COUNT; hand++) {
+        poseValid[hand] = vr_get_controller_state(hand, &states[hand]) &&
+            states[hand].gripPoseValid;
+        if (!poseValid[hand]) {
+            sVrTabletopGripHeld[hand] = false;
+            continue;
+        }
+
+        // Hysteresis prevents analog grip noise near the threshold from
+        // repeatedly dropping and reacquiring the miniature.
+        if (sVrTabletopGripHeld[hand]) {
+            if (states[hand].squeeze <= 0.35f) {
+                sVrTabletopGripHeld[hand] = false;
+            }
+        } else if (states[hand].squeeze >= 0.55f) {
+            sVrTabletopGripHeld[hand] = true;
+        }
+
+        if (sVrTabletopGripHeld[hand]) {
+            heldCount++;
+            heldHand = (s8)hand;
+        }
+    }
+
+    if (heldCount == 2 && poseValid[0] && poseValid[1]) {
+        Vec3f midpoint;
+        Vec3f separation;
+        for (u32 axis = 0; axis < 3; axis++) {
+            midpoint[axis] =
+                (states[0].gripPosition[axis] +
+                 states[1].gripPosition[axis]) * 0.5f;
+            separation[axis] =
+                states[1].gripPosition[axis] -
+                states[0].gripPosition[axis];
+        }
+        const f32 distance = sqrtf(
+            separation[0] * separation[0] +
+            separation[1] * separation[1] +
+            separation[2] * separation[2]
+        );
+        const f32 horizontalDistance = sqrtf(
+            separation[0] * separation[0] +
+            separation[2] * separation[2]
+        );
+        const f32 handAngle = atan2f(separation[2], separation[0]);
+
+        if (sVrTabletopManipulationHands != 2) {
+            vec3f_copy(sVrTabletopGestureStartMidpoint, midpoint);
+            vec3f_set(
+                sVrTabletopGestureStartCenter,
+                sVrTabletopUserOffset[0],
+                -VR_TABLETOP_DOWN_METERS +
+                    sVrTabletopUserOffset[1],
+                -VR_TABLETOP_FORWARD_METERS +
+                    sVrTabletopUserOffset[2]
+            );
+            sVrTabletopGestureStartDistance = distance;
+            sVrTabletopGestureStartScale = sVrTabletopWorldScale;
+            sVrTabletopGestureStartYaw = sVrTabletopWorldYaw;
+            sVrTabletopGestureStartAngle = handAngle;
+            sVrTabletopGestureStartAngleValid =
+                horizontalDistance >= 0.10f;
+            float headPosition[3];
+            sVrTabletopGestureStartHeadValid =
+                vr_get_head_translation(headPosition);
+            if (sVrTabletopGestureStartHeadValid) {
+                vec3f_copy(
+                    sVrTabletopGestureStartHead,
+                    headPosition
+                );
+            }
+        } else {
+            f32 scaleRatio = 1.0f;
+            if (distance > 0.05f &&
+                sVrTabletopGestureStartDistance > 0.05f) {
+                scaleRatio =
+                    distance / sVrTabletopGestureStartDistance;
+                // Controller prediction has sub-millimetre noise even while
+                // both hands are still. A small gesture-relative dead zone
+                // prevents that noise from slowly dollying the world.
+                if (fabsf(scaleRatio - 1.0f) < 0.0125f) {
+                    scaleRatio = 1.0f;
+                }
+                sVrTabletopWorldScale = clamp(
+                    sVrTabletopGestureStartScale * scaleRatio,
+                    VR_TABLETOP_MIN_WORLD_SCALE,
+                    VR_TABLETOP_MAX_WORLD_SCALE
+                );
+                scaleRatio = sVrTabletopWorldScale /
+                    sVrTabletopGestureStartScale;
+            }
+
+            const f32 pi = 3.14159265358979323846f;
+            if (sVrTabletopGestureStartAngleValid &&
+                horizontalDistance >= 0.10f) {
+                f32 handAngleDelta =
+                    handAngle - sVrTabletopGestureStartAngle;
+                while (handAngleDelta > pi) {
+                    handAngleDelta -= 2.0f * pi;
+                }
+                while (handAngleDelta < -pi) {
+                    handAngleDelta += 2.0f * pi;
+                }
+                if (fabsf(handAngleDelta) < 0.0175f) {
+                    handAngleDelta = 0.0f;
+                }
+                sVrTabletopWorldYaw =
+                    sVrTabletopGestureStartYaw +
+                    (s16)(handAngleDelta * 32768.0f / pi);
+            }
+
+            // Rebuild the transform from the gesture's initial snapshot on
+            // every frame. This makes the pivot deterministic: tracking
+            // noise cannot accumulate into scale, yaw, or positional drift.
+            Vec3f newCenter;
+            vec3f_copy(newCenter, sVrTabletopGestureStartCenter);
+            if (sVrTabletopGestureStartHeadValid &&
+                scaleRatio > 0.0001f) {
+                const f32 distanceCompensation =
+                    1.0f / sqrtf(scaleRatio);
+                for (u32 axis = 0; axis < 3; axis++) {
+                    newCenter[axis] =
+                        sVrTabletopGestureStartHead[axis] +
+                        (sVrTabletopGestureStartCenter[axis] -
+                         sVrTabletopGestureStartHead[axis]) *
+                        distanceCompensation;
+                }
+            }
+            for (u32 axis = 0; axis < 3; axis++) {
+                newCenter[axis] +=
+                    midpoint[axis] -
+                    sVrTabletopGestureStartMidpoint[axis];
+            }
+            sVrTabletopUserOffset[0] = newCenter[0];
+            sVrTabletopUserOffset[1] =
+                newCenter[1] + VR_TABLETOP_DOWN_METERS;
+            sVrTabletopUserOffset[2] =
+                newCenter[2] + VR_TABLETOP_FORWARD_METERS;
+        }
+
+        sVrTabletopManipulationHands = 2;
+        sVrTabletopManipulationHand = -1;
+        return;
+    }
+
+    if (heldCount == 1 && heldHand >= 0) {
+        Vec3f currentPosition = {
+            states[heldHand].gripPosition[0],
+            states[heldHand].gripPosition[1],
+            states[heldHand].gripPosition[2]
+        };
+        if (sVrTabletopManipulationHands == 1 &&
+            sVrTabletopManipulationHand == heldHand) {
+            for (u32 axis = 0; axis < 3; axis++) {
+                sVrTabletopUserOffset[axis] +=
+                    currentPosition[axis] -
+                    sVrTabletopPreviousHandPosition[axis];
+            }
+        }
+        vec3f_copy(sVrTabletopPreviousHandPosition, currentPosition);
+        sVrTabletopManipulationHands = 1;
+        sVrTabletopManipulationHand = heldHand;
+        sVrTabletopGestureStartDistance = 0.0f;
+        sVrTabletopGestureStartAngleValid = false;
+        sVrTabletopGestureStartHeadValid = false;
+        return;
+    }
+
+    sVrTabletopManipulationHands = 0;
+    sVrTabletopManipulationHand = -1;
+    sVrTabletopGestureStartDistance = 0.0f;
+    sVrTabletopGestureStartAngleValid = false;
+    sVrTabletopGestureStartHeadValid = false;
+}
+
 static bool vr_build_head_view_matrix(
     uint32_t eyeIndex,
     Mat4 matrix
@@ -3596,6 +3903,63 @@ static bool vr_build_head_view_matrix(
         matrix[3][0] -= eyeOffset[0] * worldUnitsPerMeter;
         matrix[3][1] -= eyeOffset[1] * worldUnitsPerMeter;
         matrix[3][2] -= eyeOffset[2] * worldUnitsPerMeter;
+    }
+
+    if (!menuScene &&
+        configVrCameraMode == VR_CAMERA_MODE_TABLETOP &&
+        sCameraNode != NULL) {
+        if (eyeIndex == 0) {
+            vr_update_tabletop_manipulation();
+        }
+        if (!sVrTabletopAnchorValid ||
+            sVrTabletopAnchorLevel != gCurrLevelNum ||
+            sVrTabletopAnchorArea != gCurrAreaIndex) {
+            vec3f_copy(sVrTabletopAnchor, gMarioStates[0].pos);
+            sVrTabletopAnchorLevel = gCurrLevelNum;
+            sVrTabletopAnchorArea = gCurrAreaIndex;
+            sVrTabletopAnchorValid = true;
+        }
+
+        Vec3f cameraPosition;
+        Vec3f cameraFocus;
+        if (gRenderingInterpolated) {
+            delta_interpolate_vec3f(
+                cameraPosition,
+                sCameraNode->prevPos,
+                sCameraNode->pos,
+                gRenderingDelta
+            );
+            delta_interpolate_vec3f(
+                cameraFocus,
+                sCameraNode->prevFocus,
+                sCameraNode->focus,
+                gRenderingDelta
+            );
+        } else {
+            vec3f_copy(cameraPosition, sCameraNode->pos);
+            vec3f_copy(cameraFocus, sCameraNode->focus);
+        }
+
+        Mat4 gameCamera;
+        Mat4 inverseGameCamera;
+        Mat4 tabletopTransform;
+        Mat4 cameraToTabletop;
+        Mat4 trackedView;
+        vr_build_game_camera_matrix(
+            gameCamera,
+            cameraPosition,
+            cameraFocus,
+            sCameraNode->roll
+        );
+        mtxf_inverse(inverseGameCamera, gameCamera);
+        vr_build_tabletop_transform(tabletopTransform);
+
+        // Model matrices already contain the game's Mario-following camera.
+        // Cancel it in projection space, then apply only the fixed miniature
+        // transform and the latest tracked 6DoF eye pose.
+        mtxf_copy(trackedView, matrix);
+        mtxf_mul(cameraToTabletop, inverseGameCamera, tabletopTransform);
+        mtxf_mul(matrix, cameraToTabletop, trackedView);
     }
 
     return true;
@@ -4472,9 +4836,20 @@ void patch_mtx_vr_shared(void) {
     // These model transforms are headset/controller-relative and therefore
     // identical for both eyes, so prepare them once per submitted XR frame.
     patch_mtx_vr_billboards(0);
-    if (configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON &&
+    const bool firstPersonHands =
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON;
+    const bool tabletopHands =
+        configVrCameraMode == VR_CAMERA_MODE_TABLETOP;
+    if ((firstPersonHands || tabletopHands) &&
         configVrMotionControllerInput) {
         vr_patch_controller_hand_matrices(0);
+
+        // Tabletop uses the tracked models only as room-space cursors for
+        // manipulating the miniature. Native held-object and weapon patches
+        // belong exclusively to first-person gameplay.
+        if (tabletopHands) {
+            return;
+        }
 
         if (sVrHeldMatrixHead != NULL) {
             // Keep an immutable copy of the complete held hierarchy before
@@ -5071,8 +5446,11 @@ static void vr_append_controller_hands(
     struct RenderModeContainer* modeList,
     struct RenderModeContainer* mode2List
 ) {
+    const bool supportedCameraMode =
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON ||
+        configVrCameraMode == VR_CAMERA_MODE_TABLETOP;
     if (!vr_is_active() ||
-        configVrCameraMode != VR_CAMERA_MODE_FIRST_PERSON ||
+        !supportedCameraMode ||
         !configVrMotionControllerInput ||
         !enableZBuffer ||
         gCurGraphNodeMasterList != sVrControllerHandMasterList ||
@@ -5114,11 +5492,16 @@ static void vr_append_controller_hands(
         gSPDisplayList(gDisplayListHead++, localPlayerColors);
     }
 
-    vr_update_painting_exit_hat_gesture();
-    const bool victoryGestureAvailable =
+    const bool firstPerson =
+        configVrCameraMode == VR_CAMERA_MODE_FIRST_PERSON;
+    if (firstPerson) {
+        vr_update_painting_exit_hat_gesture();
+    }
+    const bool victoryGestureAvailable = firstPerson &&
         vr_victory_hand_gesture_available();
-    const u8 paintingExitHatAlpha =
-        vr_painting_exit_hat_alpha();
+    const u8 paintingExitHatAlpha = firstPerson
+        ? vr_painting_exit_hat_alpha()
+        : 0;
 
     for (uint32_t hand = 0;
          hand < VR_CONTROLLER_COUNT;
@@ -5631,6 +6014,7 @@ static void geo_process_perspective(struct GraphNodePerspective *node) {
     gSPMatrix(gDisplayListHead++, VIRTUAL_TO_PHYSICAL(mtx), G_MTX_PROJECTION | G_MTX_LOAD | G_MTX_NOPUSH);
 
     if (vr_is_active() &&
+        configVrCameraMode != VR_CAMERA_MODE_TABLETOP &&
         gVrSkyDomeGfx != NULL &&
         gVrSkyProjectionMtx != NULL &&
         gVrSkyDomeFrame == gGlobalTimer) {
@@ -6054,6 +6438,13 @@ static void geo_process_generated_list(struct GraphNodeGenerated *node) {
  */
 static void geo_process_background(struct GraphNodeBackground *node) {
     Gfx *list = NULL;
+
+    if (vr_is_active() &&
+        configVrCameraMode == VR_CAMERA_MODE_TABLETOP) {
+        // Leave the background clear in Tabletop so a later MR version can
+        // place passthrough behind the game geometry without changing levels.
+        return;
+    }
 
     if (node->fnNode.func != NULL) {
         Vec3f posCopy;
