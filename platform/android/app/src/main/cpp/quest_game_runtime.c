@@ -429,6 +429,19 @@ bool quest_game_tabletop_mario_tracking_position(float out_position[3]) {
     return sReady && vr_get_tabletop_mario_tracking_position(out_position);
 }
 
+bool quest_game_room_pulse_test_requested(void) {
+    static bool was_down;
+    struct VrControllerState left;
+    struct VrControllerState right;
+    const bool down = sReady &&
+        vr_get_controller_state(VR_CONTROLLER_LEFT, &left) &&
+        vr_get_controller_state(VR_CONTROLLER_RIGHT, &right) &&
+        left.thumbstickButton && right.thumbstickButton;
+    const bool pressed = down && !was_down;
+    was_down = down;
+    return pressed;
+}
+
 void quest_game_prepare_vr_frame(void) {
     if (!sReady || !sCompletedGameTick) return;
     const int64_t now = monotonic_ns();

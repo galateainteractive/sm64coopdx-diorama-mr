@@ -38,7 +38,7 @@ extern bool quest_vr_bridge_recentered_to_local(
 #define QUEST_DEFAULT_RENDER_SCALE_PERCENT 80U
 #define QUEST_PASSTHROUGH_LUT_RESOLUTION 32U
 #define QUEST_STAR_PULSE_DURATION_NS 2200000000LL
-#define QUEST_ROOM_PULSE_DURATION_NS 2800000000LL
+#define QUEST_ROOM_PULSE_DURATION_NS 5000000000LL
 #define QUEST_ROOM_MESH_MAX 4U
 #define QUEST_ROOM_QUERY_MAX_RESULTS 16U
 
@@ -2017,10 +2017,10 @@ static bool initialize_room_mesh(QuestApp *app) {
         "precision highp float; in vec3 worldPosition; out vec4 color;\n"
         "uniform vec3 pulseCenter; uniform float pulseRadius; uniform float pulseOpacity;\n"
         "void main(){float d=abs(distance(worldPosition,pulseCenter)-pulseRadius);"
-        "float band=1.0-smoothstep(0.10,0.28,d);"
-        "float glow=1.0-smoothstep(0.28,0.62,d);"
-        "float a=(band*0.82+glow*0.20)*pulseOpacity;"
-        "color=vec4(vec3(1.0,0.58,0.035)*a,a);}\n";
+        "float band=1.0-smoothstep(0.22,0.52,d);"
+        "float glow=1.0-smoothstep(0.52,1.05,d);"
+        "float a=(band*0.95+glow*0.34)*pulseOpacity;"
+        "color=vec4(vec3(1.0,0.48,0.015)*a,a);}\n";
     const GLuint vertex = compile_shader(GL_VERTEX_SHADER, vertex_source);
     const GLuint fragment = compile_shader(GL_FRAGMENT_SHADER, fragment_source);
     if (vertex == 0 || fragment == 0) {
@@ -2065,18 +2065,47 @@ static bool initialize_room_mesh(QuestApp *app) {
     return true;
 }
 
-static void update_room_pulse(QuestApp *app, XrTime display_time) {
-    request_room_mesh_query(app, display_time);
-    const uint32_t serial = quest_game_star_collection_serial();
-    if (serial == app->room_observed_star_serial) return;
-    app->room_observed_star_serial = serial;
+static void start_room_pulse(
+    QuestApp *app, XrTime display_time, bool manual_test) {
     float recentered[3];
     if (quest_game_tabletop_mario_tracking_position(recentered) &&
         quest_vr_bridge_recentered_to_local(
             recentered, app->room_pulse_center_position)) {
-        app->room_pulse_start_time = display_time;
-        LOGI("Room Mesh star pulse started at Mario.");
+        /* Mario is the intended origin. */
+    } else {
+        app->room_pulse_center_position[0] =
+            (app->views[0].pose.position.x +
+             app->views[1].pose.position.x) * 0.5f;
+        app->room_pulse_center_position[1] =
+            (app->views[0].pose.position.y +
+             app->views[1].pose.position.y) * 0.5f;
+        app->room_pulse_center_position[2] =
+            (app->views[0].pose.position.z +
+             app->views[1].pose.position.z) * 0.5f;
     }
+    app->room_pulse_start_time = display_time;
+    if (manual_test) {
+        /* The passthrough LUT flash acknowledges the button even if Scene
+         * data was unavailable, separating input failure from mesh failure. */
+        app->star_pulse_start_time = display_time;
+    }
+    LOGI("%s Room Mesh pulse started at %.2f, %.2f, %.2f; %u room(s) loaded.",
+         manual_test ? "Manual" : "Star",
+         app->room_pulse_center_position[0],
+         app->room_pulse_center_position[1],
+         app->room_pulse_center_position[2],
+         app->room_mesh_count);
+}
+
+static void update_room_pulse(QuestApp *app, XrTime display_time) {
+    request_room_mesh_query(app, display_time);
+    if (quest_game_room_pulse_test_requested()) {
+        start_room_pulse(app, display_time, true);
+    }
+    const uint32_t serial = quest_game_star_collection_serial();
+    if (serial == app->room_observed_star_serial) return;
+    app->room_observed_star_serial = serial;
+    start_room_pulse(app, display_time, false);
 }
 
 static void build_projection_matrix(const XrFovf *fov, float out[16]) {
@@ -2105,8 +2134,9 @@ static void render_room_pulse(
     if (elapsed >= QUEST_ROOM_PULSE_DURATION_NS) return;
     const float progress =
         (float)((double)elapsed / (double)QUEST_ROOM_PULSE_DURATION_NS);
-    const float radius = 0.08f + progress * 8.0f;
-    const float opacity = sinf(progress * 3.14159265f) * 0.92f;
+    const float radius = 0.05f + progress * 12.0f;
+    const float opacity =
+        0.55f + sinf(progress * 3.14159265f) * 0.45f;
     float projection[16];
     build_projection_matrix(&app->views[eye].fov, projection);
 
