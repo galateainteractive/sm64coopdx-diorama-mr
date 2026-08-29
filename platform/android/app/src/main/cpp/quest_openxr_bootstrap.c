@@ -40,6 +40,7 @@ extern bool quest_vr_bridge_recentered_to_local(
 #define QUEST_STAR_PULSE_DURATION_NS 2200000000LL
 #define QUEST_ROOM_PULSE_DURATION_NS 5000000000LL
 #define QUEST_ROOM_MESH_MAX 4U
+#define QUEST_ROOM_PULSE_ENABLED 0
 #define QUEST_ROOM_QUERY_MAX_RESULTS 16U
 
 typedef struct QuestRoomMesh {
@@ -2222,6 +2223,11 @@ static void start_room_pulse(
 }
 
 static void update_room_pulse(QuestApp *app, XrTime display_time) {
+    // The experimental Scene Mesh draw path is parked while its Quest crash is
+    // investigated. Do not query or render room geometry from star collection
+    // or the old two-stick diagnostic in otherwise stable Tabletop builds.
+    if (!QUEST_ROOM_PULSE_ENABLED) return;
+
     request_room_mesh_query(app, display_time);
     if (quest_game_room_pulse_test_requested()) {
         start_room_pulse(app, display_time, true);

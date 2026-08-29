@@ -794,6 +794,9 @@ static f32 sVrTabletopGestureStartScale = VR_TABLETOP_WORLD_SCALE;
 static s16 sVrTabletopGestureStartYaw = 0;
 static bool sVrTabletopGestureStartAngleValid = false;
 static void vr_build_tabletop_transform(Mat4 transform);
+static void vr_build_game_camera_matrix(
+    Mat4 matrix, Vec3f position, Vec3f focus, s16 roll
+);
 static void vr_apply_tabletop_hand_space_correction(Mat4 matrix);
 static bool sVrHeadRotationMatrixValid = false;
 static float sVrHeadRotationQuaternion[4] = { 0 };
@@ -4121,8 +4124,178 @@ bool vr_world_pos_to_ndc(Vec3f worldPosition, Vec3f ndcPosition) {
     return vr_world_pos_to_eye_ndc(worldPosition, 0, true, ndcPosition);
 }
 
+static bool patch_mtx_vr_tabletop_billboards(void) {
+    if (!vr_is_active() ||
+        configVrCameraMode != VR_CAMERA_MODE_TABLETOP ||
+        !sVrTabletopAnchorValid || sCameraNode == NULL) {
+        return false;
+    }
+
+    float headTranslation[3] = { 0 };
+    Mat4 headRotation;
+    if (!vr_get_head_translation(headTranslation) ||
+        !vr_build_head_rotation_matrix(headRotation)) {
+        return false;
+    }
+
+    Vec3f cameraPosition;
+    Vec3f cameraFocus;
+    if (gRenderingInterpolated) {
+        delta_interpolate_vec3f(
+            cameraPosition,
+            sCameraNode->prevPos,
+            sCameraNode->pos,
+            gRenderingDelta
+        );
+        delta_interpolate_vec3f(
+            cameraFocus,
+            sCameraNode->prevFocus,
+            sCameraNode->focus,
+            gRenderingDelta
+        );
+    } else {
+        vec3f_copy(cameraPosition, sCameraNode->pos);
+        vec3f_copy(cameraFocus, sCameraNode->focus);
+    }
+
+    Mat4 gameCamera;
+    Mat4 inverseGameCamera;
+    Mat4 tabletopTransform;
+    Mat4 cameraToTabletop;
+    Mat4 tabletopToCamera;
+    vr_build_game_camera_matrix(
+        gameCamera,
+        cameraPosition,
+        cameraFocus,
+        sCameraNode->roll
+    );
+    mtxf_inverse(inverseGameCamera, gameCamera);
+    vr_build_tabletop_transform(tabletopTransform);
+    mtxf_mul(cameraToTabletop, inverseGameCamera, tabletopTransform);
+    mtxf_inverse(tabletopToCamera, cameraToTabletop);
+
+    Vec3f headPosition = {
+        headTranslation[0] * VR_TABLETOP_UNITS_PER_METER,
+        headTranslation[1] * VR_TABLETOP_UNITS_PER_METER,
+        headTranslation[2] * VR_TABLETOP_UNITS_PER_METER
+    };
+    Vec3f worldUp = { 0.0f, 1.0f, 0.0f };
+
+    for (struct MtxInterp *interp = sVrBillboardHead;
+         interp != NULL;
+         interp = interp->nextVrBillboard) {
+        if (!interp->vrBaseReady) {
+            continue;
+        }
+
+        Mat4 trackingMatrix;
+        mtxf_mul(trackingMatrix, interp->vrBase.m, cameraToTabletop);
+
+        Vec3f backward = {
+            headPosition[0] - trackingMatrix[3][0],
+            headPosition[1] - trackingMatrix[3][1],
+            headPosition[2] - trackingMatrix[3][2]
+        };
+        if (interp->billboard == VR_BILLBOARD_CYLINDRICAL) {
+            // Trees and other upright cards turn around the miniature's up
+            // axis, but never lean when the user crouches or looks down.
+            backward[1] = 0.0f;
+        }
+
+        f32 length = sqrtf(
+            backward[0] * backward[0] +
+            backward[1] * backward[1] +
+            backward[2] * backward[2]
+        );
+        if (!isfinite(length) || length <= 0.001f) {
+            backward[0] = headRotation[0][2];
+            backward[1] = interp->billboard == VR_BILLBOARD_CYLINDRICAL
+                ? 0.0f : headRotation[1][2];
+            backward[2] = headRotation[2][2];
+            length = sqrtf(
+                backward[0] * backward[0] +
+                backward[1] * backward[1] +
+                backward[2] * backward[2]
+            );
+        }
+        if (!isfinite(length) || length <= 0.001f) {
+            continue;
+        }
+        vec3f_mul(backward, 1.0f / length);
+
+        Vec3f right;
+        vec3f_cross(right, worldUp, backward);
+        length = sqrtf(
+            right[0] * right[0] +
+            right[1] * right[1] +
+            right[2] * right[2]
+        );
+        if (!isfinite(length) || length <= 0.001f) {
+            // Looking almost straight down makes world-up parallel to the
+            // viewing ray. The tracked head's right axis is stable there.
+            right[0] = headRotation[0][0];
+            right[1] = headRotation[1][0];
+            right[2] = headRotation[2][0];
+            length = sqrtf(
+                right[0] * right[0] +
+                right[1] * right[1] +
+                right[2] * right[2]
+            );
+        }
+        if (!isfinite(length) || length <= 0.001f) {
+            continue;
+        }
+        vec3f_mul(right, 1.0f / length);
+
+        Vec3f up;
+        if (interp->billboard == VR_BILLBOARD_CYLINDRICAL) {
+            vec3f_copy(up, worldUp);
+        } else {
+            vec3f_cross(up, backward, right);
+            length = sqrtf(
+                up[0] * up[0] + up[1] * up[1] + up[2] * up[2]
+            );
+            if (!isfinite(length) || length <= 0.001f) {
+                continue;
+            }
+            vec3f_mul(up, 1.0f / length);
+        }
+
+        const f32 scale[3] = {
+            sqrtf(trackingMatrix[0][0] * trackingMatrix[0][0] +
+                  trackingMatrix[0][1] * trackingMatrix[0][1] +
+                  trackingMatrix[0][2] * trackingMatrix[0][2]),
+            sqrtf(trackingMatrix[1][0] * trackingMatrix[1][0] +
+                  trackingMatrix[1][1] * trackingMatrix[1][1] +
+                  trackingMatrix[1][2] * trackingMatrix[1][2]),
+            sqrtf(trackingMatrix[2][0] * trackingMatrix[2][0] +
+                  trackingMatrix[2][1] * trackingMatrix[2][1] +
+                  trackingMatrix[2][2] * trackingMatrix[2][2])
+        };
+        for (s32 axis = 0; axis < 3; axis++) {
+            trackingMatrix[0][axis] = right[axis] * scale[0];
+            trackingMatrix[1][axis] = up[axis] * scale[1];
+            trackingMatrix[2][axis] = backward[axis] * scale[2];
+        }
+
+        Mat4 adjusted;
+        mtxf_mul(adjusted, trackingMatrix, tabletopToCamera);
+        mtxf_copy(interp->interp.m, adjusted);
+    }
+
+    return true;
+}
+
 static void patch_mtx_vr_billboards(uint32_t eyeIndex) {
     if (sVrBillboardHead == NULL) {
+        return;
+    }
+
+    // Tabletop billboards must face the viewer from their actual location in
+    // tracking space. Merely cancelling HMD orientation leaves the miniature's
+    // yaw and the old Mario-following camera in the basis, which turns coins
+    // and trees edge-on (or back-facing) as the user walks around the model.
+    if (patch_mtx_vr_tabletop_billboards()) {
         return;
     }
 
