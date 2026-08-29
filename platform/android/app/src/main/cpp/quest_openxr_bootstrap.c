@@ -149,6 +149,8 @@ typedef struct QuestApp {
     bool passthrough_color_lut_supported;
     bool render_model_supported;
     bool room_mesh_supported;
+    bool triangle_mesh_supported;
+    bool room_query_uses_triangle_mesh;
     char system_name[XR_MAX_SYSTEM_NAME_SIZE];
     XrFoveationProfileFB foveation_profiles[3];
     unsigned int active_foveation_profile;
@@ -190,6 +192,7 @@ typedef struct QuestApp {
     PFN_xrSetSpaceComponentStatusFB set_space_component_status;
     PFN_xrGetSpaceRoomMeshMETA get_space_room_mesh;
     PFN_xrGetSpaceRoomMeshFaceIndicesMETA get_room_mesh_face_indices;
+    PFN_xrGetSpaceTriangleMeshMETA get_space_triangle_mesh;
     QuestRoomMesh room_meshes[QUEST_ROOM_MESH_MAX];
     uint32_t room_mesh_count;
     bool room_query_pending;
@@ -564,19 +567,28 @@ static bool create_openxr_instance(QuestApp *app) {
     if (app->render_model_supported) {
         extensions[extension_count++] = XR_FB_RENDER_MODEL_EXTENSION_NAME;
     }
-    app->room_mesh_supported =
+    const bool scene_query_supported =
         openxr_extension_available(XR_FB_SPATIAL_ENTITY_EXTENSION_NAME) &&
         openxr_extension_available(XR_FB_SPATIAL_ENTITY_QUERY_EXTENSION_NAME) &&
         openxr_extension_available(XR_FB_SPATIAL_ENTITY_STORAGE_EXTENSION_NAME) &&
-        openxr_extension_available(XR_FB_SCENE_EXTENSION_NAME) &&
+        openxr_extension_available(XR_FB_SCENE_EXTENSION_NAME);
+    app->room_mesh_supported = scene_query_supported &&
         openxr_extension_available(XR_META_SPATIAL_ENTITY_ROOM_MESH_EXTENSION_NAME);
-    if (app->room_mesh_supported) {
+    app->triangle_mesh_supported = scene_query_supported &&
+        openxr_extension_available(XR_META_SPATIAL_ENTITY_MESH_EXTENSION_NAME);
+    if (app->room_mesh_supported || app->triangle_mesh_supported) {
         extensions[extension_count++] = XR_FB_SPATIAL_ENTITY_EXTENSION_NAME;
         extensions[extension_count++] = XR_FB_SPATIAL_ENTITY_QUERY_EXTENSION_NAME;
         extensions[extension_count++] = XR_FB_SPATIAL_ENTITY_STORAGE_EXTENSION_NAME;
         extensions[extension_count++] = XR_FB_SCENE_EXTENSION_NAME;
+    }
+    if (app->room_mesh_supported) {
         extensions[extension_count++] =
             XR_META_SPATIAL_ENTITY_ROOM_MESH_EXTENSION_NAME;
+    }
+    if (app->triangle_mesh_supported) {
+        extensions[extension_count++] =
+            XR_META_SPATIAL_ENTITY_MESH_EXTENSION_NAME;
     }
 
     XrInstanceCreateInfoAndroidKHR android_info = {
@@ -1881,6 +1893,79 @@ static bool load_room_mesh(QuestApp *app, XrSpace space) {
     return true;
 }
 
+static bool load_triangle_mesh(QuestApp *app, XrSpace space) {
+    for (uint32_t i = 0; i < app->room_mesh_count; ++i) {
+        if (app->room_meshes[i].space == space) return true;
+    }
+    if (app->room_mesh_count >= QUEST_ROOM_MESH_MAX) {
+        xrDestroySpace(space);
+        return false;
+    }
+    XrSpaceTriangleMeshGetInfoMETA get_info = {
+        .type = XR_TYPE_SPACE_TRIANGLE_MESH_GET_INFO_META,
+    };
+    XrSpaceTriangleMeshMETA triangle = {
+        .type = XR_TYPE_SPACE_TRIANGLE_MESH_META,
+    };
+    XrResult result =
+        app->get_space_triangle_mesh(space, &get_info, &triangle);
+    if (XR_FAILED(result) || triangle.vertexCountOutput == 0 ||
+        triangle.indexCountOutput == 0 ||
+        triangle.vertexCountOutput > 2000000U ||
+        triangle.indexCountOutput > 6000000U) {
+        LOGI("Triangle Scene Mesh geometry was unavailable (%d, %u vertices, %u indices).",
+             (int)result, triangle.vertexCountOutput,
+             triangle.indexCountOutput);
+        xrDestroySpace(space);
+        return false;
+    }
+    XrVector3f *vertices =
+        calloc(triangle.vertexCountOutput, sizeof(*vertices));
+    uint32_t *indices =
+        calloc(triangle.indexCountOutput, sizeof(*indices));
+    if (vertices == NULL || indices == NULL) {
+        free(vertices);
+        free(indices);
+        xrDestroySpace(space);
+        return false;
+    }
+    triangle.vertexCapacityInput = triangle.vertexCountOutput;
+    triangle.vertices = vertices;
+    triangle.indexCapacityInput = triangle.indexCountOutput;
+    triangle.indices = indices;
+    result = app->get_space_triangle_mesh(space, &get_info, &triangle);
+    if (XR_FAILED(result)) {
+        LOGI("Could not read Triangle Scene Mesh (%d).", (int)result);
+        free(vertices);
+        free(indices);
+        xrDestroySpace(space);
+        return false;
+    }
+
+    QuestRoomMesh *mesh = &app->room_meshes[app->room_mesh_count];
+    mesh->space = space;
+    mesh->index_count = triangle.indexCountOutput;
+    glGenBuffers(1, &mesh->vertex_buffer);
+    glBindBuffer(GL_ARRAY_BUFFER, mesh->vertex_buffer);
+    glBufferData(GL_ARRAY_BUFFER,
+                 triangle.vertexCountOutput * sizeof(*vertices), vertices,
+                 GL_STATIC_DRAW);
+    glGenBuffers(1, &mesh->index_buffer);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->index_buffer);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER,
+                 triangle.indexCountOutput * sizeof(*indices), indices,
+                 GL_STATIC_DRAW);
+    glBindBuffer(GL_ARRAY_BUFFER, 0);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    free(vertices);
+    free(indices);
+    ++app->room_mesh_count;
+    LOGI("Loaded Triangle Scene Mesh %u: %u vertices, %u indices.",
+         app->room_mesh_count, triangle.vertexCountOutput,
+         triangle.indexCountOutput);
+    return true;
+}
+
 static void handle_room_query_results(
     QuestApp *app, XrAsyncRequestIdFB request_id) {
     XrSpaceQueryResultsFB query = {
@@ -1889,7 +1974,10 @@ static void handle_room_query_results(
     XrResult result = app->retrieve_space_query_results(
         app->session, request_id, &query);
     if (XR_FAILED(result) || query.resultCountOutput == 0) {
-        LOGI("Room Mesh query returned no rooms (%d).", (int)result);
+        LOGI("%s query returned no scene meshes (%d).",
+             app->room_query_uses_triangle_mesh
+                 ? "Triangle Scene Mesh" : "Room Mesh",
+             (int)result);
         return;
     }
     XrSpaceQueryResultFB *results =
@@ -1923,7 +2011,11 @@ static void handle_room_query_results(
         if (result == XR_ERROR_SPACE_COMPONENT_STATUS_ALREADY_SET_FB ||
             room_space_component_enabled(
                 app, space, XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB)) {
-            (void)load_room_mesh(app, space);
+            if (app->room_query_uses_triangle_mesh) {
+                (void)load_triangle_mesh(app, space);
+            } else {
+                (void)load_room_mesh(app, space);
+            }
         } else if (XR_FAILED(result)) {
             LOGI("Could not make Room Mesh locatable (%d).", (int)result);
             xrDestroySpace(space);
@@ -1933,7 +2025,8 @@ static void handle_room_query_results(
 }
 
 static void request_room_mesh_query(QuestApp *app, XrTime display_time) {
-    if (!app->room_mesh_supported || app->room_query_pending ||
+    if ((!app->room_mesh_supported && !app->triangle_mesh_supported) ||
+        app->room_query_pending ||
         app->room_query_complete || app->room_mesh_count > 0 ||
         !quest_game_tabletop_mr_requested() ||
         app->session_state != XR_SESSION_STATE_FOCUSED ||
@@ -1946,7 +2039,9 @@ static void request_room_mesh_query(QuestApp *app, XrTime display_time) {
     XrSpaceComponentFilterInfoFB component = {
         .type = XR_TYPE_SPACE_COMPONENT_FILTER_INFO_FB,
         .next = &storage,
-        .componentType = XR_SPACE_COMPONENT_TYPE_ROOM_MESH_META,
+        .componentType = app->room_query_uses_triangle_mesh
+            ? XR_SPACE_COMPONENT_TYPE_TRIANGLE_MESH_META
+            : XR_SPACE_COMPONENT_TYPE_ROOM_MESH_META,
     };
     XrSpaceQueryInfoFB query = {
         .type = XR_TYPE_SPACE_QUERY_INFO_FB,
@@ -1961,7 +2056,9 @@ static void request_room_mesh_query(QuestApp *app, XrTime display_time) {
         &request_id);
     if (XR_SUCCEEDED(result)) {
         app->room_query_pending = true;
-        LOGI("Requested the Meta Room Mesh for the tabletop star pulse.");
+        LOGI("Requested the Meta %s for the tabletop star pulse.",
+             app->room_query_uses_triangle_mesh
+                 ? "Triangle Scene Mesh fallback" : "Room Mesh");
     } else {
         app->room_query_retry_time = display_time + 2000000000LL;
         LOGI("Room Mesh query is not ready yet (%d); will retry.", (int)result);
@@ -1969,8 +2066,8 @@ static void request_room_mesh_query(QuestApp *app, XrTime display_time) {
 }
 
 static bool initialize_room_mesh(QuestApp *app) {
-    if (!app->room_mesh_supported) {
-        LOGI("Meta Room Mesh extensions are unavailable; star pulse fallback remains active.");
+    if (!app->room_mesh_supported && !app->triangle_mesh_supported) {
+        LOGI("Meta Scene Mesh extensions are unavailable; scanner disabled.");
         return true;
     }
 #define LOAD_ROOM_PROC(member, name) \
@@ -1985,19 +2082,30 @@ static bool initialize_room_mesh(QuestApp *app) {
                    "xrGetSpaceComponentStatusFB");
     LOAD_ROOM_PROC(set_space_component_status,
                    "xrSetSpaceComponentStatusFB");
-    LOAD_ROOM_PROC(get_space_room_mesh, "xrGetSpaceRoomMeshMETA");
-    LOAD_ROOM_PROC(get_room_mesh_face_indices,
-                   "xrGetSpaceRoomMeshFaceIndicesMETA");
+    if (app->room_mesh_supported) {
+        LOAD_ROOM_PROC(get_space_room_mesh, "xrGetSpaceRoomMeshMETA");
+        LOAD_ROOM_PROC(get_room_mesh_face_indices,
+                       "xrGetSpaceRoomMeshFaceIndicesMETA");
+    }
+    if (app->triangle_mesh_supported) {
+        LOAD_ROOM_PROC(get_space_triangle_mesh,
+                       "xrGetSpaceTriangleMeshMETA");
+    }
 #undef LOAD_ROOM_PROC
-    app->room_mesh_supported = app->query_spaces != NULL &&
+    const bool common_functions_ready = app->query_spaces != NULL &&
         app->retrieve_space_query_results != NULL &&
         app->enumerate_space_components != NULL &&
         app->get_space_component_status != NULL &&
-        app->set_space_component_status != NULL &&
-        app->get_space_room_mesh != NULL &&
+        app->set_space_component_status != NULL;
+    app->room_mesh_supported = common_functions_ready &&
+        app->room_mesh_supported && app->get_space_room_mesh != NULL &&
         app->get_room_mesh_face_indices != NULL;
-    if (!app->room_mesh_supported) {
-        LOGI("Meta Room Mesh functions are incomplete; scanner disabled.");
+    app->triangle_mesh_supported = common_functions_ready &&
+        app->triangle_mesh_supported && app->get_space_triangle_mesh != NULL;
+    app->room_query_uses_triangle_mesh =
+        !app->room_mesh_supported && app->triangle_mesh_supported;
+    if (!app->room_mesh_supported && !app->triangle_mesh_supported) {
+        LOGI("Meta Scene Mesh functions are incomplete; scanner disabled.");
         return true;
     }
 
@@ -2027,6 +2135,7 @@ static bool initialize_room_mesh(QuestApp *app) {
         if (vertex != 0) glDeleteShader(vertex);
         if (fragment != 0) glDeleteShader(fragment);
         app->room_mesh_supported = false;
+        app->triangle_mesh_supported = false;
         return true;
     }
     app->room_pulse_program = glCreateProgram();
@@ -2042,6 +2151,7 @@ static bool initialize_room_mesh(QuestApp *app) {
         glDeleteProgram(app->room_pulse_program);
         app->room_pulse_program = 0;
         app->room_mesh_supported = false;
+        app->triangle_mesh_supported = false;
         return true;
     }
     app->room_pulse_projection =
@@ -2061,7 +2171,8 @@ static bool initialize_room_mesh(QuestApp *app) {
     app->room_pulse_opacity =
         glGetUniformLocation(app->room_pulse_program, "pulseOpacity");
     app->room_observed_star_serial = quest_game_star_collection_serial();
-    LOGI("Meta Room Mesh scanner is ready; awaiting spatial-data permission.");
+    LOGI("Meta Scene scanner is ready (room=%d, triangle fallback=%d); awaiting spatial data.",
+         app->room_mesh_supported, app->triangle_mesh_supported);
     return true;
 }
 
@@ -2486,32 +2597,51 @@ static bool poll_openxr_events(QuestApp *app) {
             }
         } else if (event.type == XR_TYPE_EVENT_DATA_INSTANCE_LOSS_PENDING) {
             app->exit_requested = true;
-        } else if (app->room_mesh_supported &&
+        } else if ((app->room_mesh_supported ||
+                    app->triangle_mesh_supported) &&
                    event.type ==
                        XR_TYPE_EVENT_DATA_SPACE_QUERY_RESULTS_AVAILABLE_FB) {
             const XrEventDataSpaceQueryResultsAvailableFB *available =
                 (const XrEventDataSpaceQueryResultsAvailableFB *)&event;
             handle_room_query_results(app, available->requestId);
-        } else if (app->room_mesh_supported &&
+        } else if ((app->room_mesh_supported ||
+                    app->triangle_mesh_supported) &&
                    event.type == XR_TYPE_EVENT_DATA_SPACE_QUERY_COMPLETE_FB) {
             const XrEventDataSpaceQueryCompleteFB *complete =
                 (const XrEventDataSpaceQueryCompleteFB *)&event;
             app->room_query_pending = false;
-            app->room_query_complete = true;
-            LOGI("Room Mesh query completed with result %d and %u loaded room(s).",
+            if (app->room_mesh_count == 0 &&
+                !app->room_query_uses_triangle_mesh &&
+                app->triangle_mesh_supported) {
+                app->room_query_uses_triangle_mesh = true;
+                app->room_query_complete = false;
+                app->room_query_retry_time = 0;
+                LOGI("Room Mesh yielded no geometry; switching to Triangle Scene Mesh.");
+            } else {
+                app->room_query_complete = true;
+            }
+            LOGI("Scene Mesh query completed with result %d and %u loaded mesh(es).",
                  (int)complete->result, app->room_mesh_count);
-        } else if (app->room_mesh_supported &&
+        } else if ((app->room_mesh_supported ||
+                    app->triangle_mesh_supported) &&
                    event.type ==
                        XR_TYPE_EVENT_DATA_SPACE_SET_STATUS_COMPLETE_FB) {
             const XrEventDataSpaceSetStatusCompleteFB *complete =
                 (const XrEventDataSpaceSetStatusCompleteFB *)&event;
             if (XR_SUCCEEDED(complete->result) &&
                 complete->componentType ==
-                    XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB &&
-                room_space_component_enabled(
-                    app, complete->space,
-                    XR_SPACE_COMPONENT_TYPE_ROOM_MESH_META)) {
-                (void)load_room_mesh(app, complete->space);
+                    XR_SPACE_COMPONENT_TYPE_LOCATABLE_FB) {
+                if (app->triangle_mesh_supported &&
+                    room_space_component_enabled(
+                        app, complete->space,
+                        XR_SPACE_COMPONENT_TYPE_TRIANGLE_MESH_META)) {
+                    (void)load_triangle_mesh(app, complete->space);
+                } else if (app->room_mesh_supported &&
+                           room_space_component_enabled(
+                               app, complete->space,
+                               XR_SPACE_COMPONENT_TYPE_ROOM_MESH_META)) {
+                    (void)load_room_mesh(app, complete->space);
+                }
             } else if (XR_FAILED(complete->result)) {
                 xrDestroySpace(complete->space);
             }
