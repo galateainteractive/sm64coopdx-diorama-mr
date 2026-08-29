@@ -51,7 +51,7 @@
 #if defined(__ANDROID__)
 #define SHADER_BINARY_CACHE_MAGIC 0x534D5652u
 // Increment whenever generated GLSL or the on-disk format changes.
-#define SHADER_BINARY_CACHE_VERSION 8u
+#define SHADER_BINARY_CACHE_VERSION 7u
 #define SHADER_BINARY_CACHE_MAX_BYTES (1024u * 1024u)
 
 struct ShaderBinaryCacheHeader {
@@ -358,9 +358,9 @@ struct ShaderProgram {
     uint8_t num_inputs;
     bool used_textures[2];
     uint8_t num_floats;
-    GLint attrib_locations[8];
-    GLint uniform_locations[11];
-    uint8_t attrib_sizes[8];
+    GLint attrib_locations[7];
+    GLint uniform_locations[10];
+    uint8_t attrib_sizes[7];
     uint8_t num_attribs;
     bool used_noise;
     bool used_lightmap;
@@ -413,9 +413,6 @@ static inline void gfx_opengl_set_shader_uniforms(struct ShaderProgram *prg) {
     if (prg->used_noise) { glUniform1f(prg->uniform_locations[4], (float)frame_count); }
     if (prg->used_lightmap) { glUniform3f(prg->uniform_locations[5], gVertexColor[0] / 255.0f, gVertexColor[1] / 255.0f, gVertexColor[2] / 255.0f); }
     if (prg->world_geometry) {
-        glUniform1i(prg->uniform_locations[10],
-                    vr_is_active() &&
-                    configVrCameraMode == VR_CAMERA_MODE_TABLETOP);
         if (vr_is_active() && (configVrBrightness != 100U
                               || configVrSaturation != 100U
                               || configVrContrast != 100U)) {
@@ -674,11 +671,6 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
         append_line(vs_buf, &vs_len, "varying vec2 vLightMap;");
         num_floats += 2;
     }
-    if (world_geometry) {
-        append_line(vs_buf, &vs_len, "attribute float aTabletopFade;");
-        append_line(vs_buf, &vs_len, "varying float vTabletopFade;");
-        num_floats += 1;
-    }
     for (int i = 0; i < ccf.num_inputs; i++) {
         vs_len += sprintf(vs_buf + vs_len, "attribute vec%d aInput%d;\n", opt_alpha ? 4 : 3, i + 1);
         vs_len += sprintf(vs_buf + vs_len, "varying vec%d vInput%d;\n", opt_alpha ? 4 : 3, i + 1);
@@ -695,9 +687,6 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     }
     if (opt_light_map) {
         append_line(vs_buf, &vs_len, "vLightMap = aLightMap;");
-    }
-    if (world_geometry) {
-        append_line(vs_buf, &vs_len, "vTabletopFade = aTabletopFade;");
     }
     for (int i = 0; i < ccf.num_inputs; i++) {
         vs_len += sprintf(vs_buf + vs_len, "vInput%d = aInput%d;\n", i + 1, i + 1);
@@ -724,10 +713,6 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     }
     if (opt_light_map) {
         append_line(fs_buf, &fs_len, "varying vec2 vLightMap;");
-    }
-    if (world_geometry) {
-        append_line(fs_buf, &fs_len, "varying float vTabletopFade;");
-        append_line(fs_buf, &fs_len, "uniform bool uTabletopFadeEnabled;");
     }
     for (int i = 0; i < ccf.num_inputs; i++) {
         fs_len += sprintf(fs_buf + fs_len, "varying vec%d vInput%d;\n", opt_alpha ? 4 : 3, i + 1);
@@ -965,10 +950,6 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
 
     append_line(fs_buf, &fs_len, "if (uVrColorFilter != 0) texel.rgb = applyVrColorFilter(texel.rgb, uVrColorFilter);");
 
-    if (world_geometry) {
-        append_line(fs_buf, &fs_len, "if (uTabletopFadeEnabled && dither4x4(gl_FragCoord.xy, clamp(vTabletopFade, 0.0, 1.0)) < 0.5) discard;");
-    }
-
     if (opt_alpha) {
         append_line(fs_buf, &fs_len, "gl_FragColor = texel;");
     } else {
@@ -1122,12 +1103,6 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
         ++cnt;
     }
 
-    if (world_geometry) {
-        prg->attrib_locations[cnt] = glGetAttribLocation(shader_program, "aTabletopFade");
-        prg->attrib_sizes[cnt] = 1;
-        ++cnt;
-    }
-
     for (int i = 0; i < ccf.num_inputs; i++) {
         char name[16];
         sprintf(name, "aInput%d", i + 1);
@@ -1175,7 +1150,6 @@ static struct ShaderProgram *gfx_opengl_create_and_load_new_shader(struct ColorC
     if (world_geometry) {
         prg->uniform_locations[6] = glGetUniformLocation(shader_program, "uShaderFlags");
         prg->uniform_locations[7] = glGetUniformLocation(shader_program, "uShaderFlagValues");
-        prg->uniform_locations[10] = glGetUniformLocation(shader_program, "uTabletopFadeEnabled");
         prg->world_geometry = true;
     } else {
         prg->world_geometry = false;

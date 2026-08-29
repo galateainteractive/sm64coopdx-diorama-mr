@@ -76,12 +76,6 @@
 #define VR_LEDGE_CAMERA_DROP 80.0f
 #define VR_STAR_SPAWN_FOCUS_RESPONSE 0.24f
 
-// Experimental V0: keep this isolated so the tabletop border treatment can
-// be tuned or removed without changing gameplay, materials, or level data.
-#define VR_TABLETOP_EDGE_FADE_ENABLED 1
-#define VR_TABLETOP_EDGE_FADE_START 0.72f
-#define VR_TABLETOP_EDGE_FADE_END 1.02f
-
 f32 gProjectionMaxNearValue = 5;
 s16 gProjectionVanillaNearValue = 100;
 s16 gProjectionVanillaFarValue = 1000;
@@ -785,8 +779,6 @@ static bool sVrTabletopAnchorValid = false;
 static s16 sVrTabletopAnchorLevel = -1;
 static s16 sVrTabletopAnchorArea = -1;
 static Vec3f sVrTabletopAnchor = { 0 };
-static Vec3f sVrTabletopBoundsHalfExtent = { 0 };
-static bool sVrTabletopBoundsValid = false;
 static f32 sVrTabletopWorldScale = VR_TABLETOP_WORLD_SCALE;
 static s16 sVrTabletopWorldYaw = 0;
 static Vec3f sVrTabletopUserOffset = { 0 };
@@ -1027,7 +1019,6 @@ void vr_handle_camera_mode_change(void) {
 
     sVrLastCameraMode = cameraMode;
     sVrTabletopAnchorValid = false;
-    sVrTabletopBoundsValid = false;
     sVrTabletopWorldScale = VR_TABLETOP_WORLD_SCALE;
     sVrTabletopWorldYaw = 0;
     vec3f_set(sVrTabletopUserOffset, 0.0f, 0.0f, 0.0f);
@@ -1062,37 +1053,6 @@ void vr_handle_camera_mode_change(void) {
         // silently replacing the player's calibrated standing/seated height.
         vr_request_horizontal_recenter();
     }
-}
-
-bool vr_get_tabletop_edge_fade(Vec3f worldPosition, f32 *fade) {
-#if VR_TABLETOP_EDGE_FADE_ENABLED
-    if (fade == NULL || !vr_is_active() ||
-        configVrCameraMode != VR_CAMERA_MODE_TABLETOP ||
-        !sVrTabletopAnchorValid || !sVrTabletopBoundsValid) {
-        return false;
-    }
-
-    const f32 halfX = sVrTabletopBoundsHalfExtent[0];
-    const f32 halfZ = sVrTabletopBoundsHalfExtent[2];
-    if (halfX < 100.0f || halfZ < 100.0f) {
-        return false;
-    }
-
-    const f32 nx = fabsf((worldPosition[0] - sVrTabletopAnchor[0]) / halfX);
-    const f32 nz = fabsf((worldPosition[2] - sVrTabletopAnchor[2]) / halfZ);
-    const f32 edge = sqrtf(sqrtf(nx * nx * nx * nx + nz * nz * nz * nz));
-    f32 amount = (edge - VR_TABLETOP_EDGE_FADE_START) /
-                 (VR_TABLETOP_EDGE_FADE_END - VR_TABLETOP_EDGE_FADE_START);
-    if (amount < 0.0f) amount = 0.0f;
-    if (amount > 1.0f) amount = 1.0f;
-    amount = amount * amount * (3.0f - 2.0f * amount);
-    *fade = 1.0f - amount;
-    return true;
-#else
-    (void)worldPosition;
-    (void)fade;
-    return false;
-#endif
 }
 
 static void vr_refresh_tracking_origin(void) {
@@ -4003,17 +3963,12 @@ static bool vr_build_head_view_matrix(
                 for (u32 axis = 0; axis < 3; axis++) {
                     sVrTabletopAnchor[axis] =
                         (boundsMin[axis] + boundsMax[axis]) * 0.5f;
-                    sVrTabletopBoundsHalfExtent[axis] =
-                        (boundsMax[axis] - boundsMin[axis]) * 0.5f;
                 }
-                sVrTabletopBoundsValid = true;
             } else {
                 // Menus and unusual custom areas may not expose static
                 // collision. Retain the known-good gameplay fallback rather
                 // than leaving the tabletop transform uninitialized.
                 vec3f_copy(sVrTabletopAnchor, gMarioStates[0].pos);
-                vec3f_set(sVrTabletopBoundsHalfExtent, 0.0f, 0.0f, 0.0f);
-                sVrTabletopBoundsValid = false;
             }
             sVrTabletopAnchorLevel = gCurrLevelNum;
             sVrTabletopAnchorArea = gCurrAreaIndex;

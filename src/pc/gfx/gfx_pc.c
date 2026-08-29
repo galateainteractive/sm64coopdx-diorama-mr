@@ -171,7 +171,7 @@ struct GfxDimensions gfx_current_dimensions = { 0 };
 
 static bool dropped_frame = false;
 
-static float buf_vbo[MAX_BUFFERED * (27 * 3)] = { 0.0f }; // 3 vertices in a triangle and up to 27 floats per vtx
+static float buf_vbo[MAX_BUFFERED * (26 * 3)] = { 0.0f }; // 3 vertices in a triangle and 26 floats per vtx
 static size_t buf_vbo_len = 0;
 static size_t buf_vbo_num_tris = 0;
 
@@ -1165,12 +1165,6 @@ static void OPTIMIZE_O3 gfx_sp_vertex(size_t n_vertices, size_t dest_index, cons
 
         d->u = U;
         d->v = V;
-        d->tabletop_fade = 1.0f;
-        if (luaVertexColor && sHasInverseCameraMatrix) {
-            Vec3f worldPos = { v->ob[0], v->ob[1], v->ob[2] };
-            gfx_local_to_world_space(worldPos, NULL);
-            vr_get_tabletop_edge_fade(worldPos, &d->tabletop_fade);
-        }
 
         // trivial clip rejection
         d->clip_rej = 0;
@@ -1423,10 +1417,6 @@ static void OPTIMIZE_O3 gfx_sp_tri1(uint8_t vtx1_idx, uint8_t vtx2_idx, uint8_t 
             struct RGBA* col = &v_arr[i]->color;
             buf_vbo[buf_vbo_len++] = ( (((uint16_t)col->g) << 8) | ((uint16_t)col->r) ) / 65535.0f;
             buf_vbo[buf_vbo_len++] = 1.0f - (( (((uint16_t)col->a) << 8) | ((uint16_t)col->b) ) / 65535.0f);
-        }
-
-        if (cm->world_geometry) {
-            buf_vbo[buf_vbo_len++] = v_arr[i]->tabletop_fade;
         }
 
         for (int j = 0; j < num_inputs; j++) {

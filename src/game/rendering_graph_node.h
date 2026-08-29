@@ -53,7 +53,6 @@ void register_mtx_vr_world_label(
     Vec3f currentPosition
 );
 bool vr_world_pos_to_ndc(Vec3f worldPosition, Vec3f ndcPosition);
-bool vr_get_tabletop_edge_fade(Vec3f worldPosition, f32 *fade);
 void vr_reset_first_person_calibration(void);
 void vr_handle_camera_mode_change(void);
 void vr_adjust_first_person_camera_direction(Vec3f direction);
