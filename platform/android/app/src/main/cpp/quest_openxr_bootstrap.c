@@ -1770,6 +1770,37 @@ static bool room_space_component_enabled(
         space, type, &status)) && status.enabled && !status.changePending;
 }
 
+static void upload_scene_mesh_buffers(
+    QuestRoomMesh *mesh, const XrVector3f *vertices,
+    uint32_t vertex_count, const uint32_t *indices,
+    uint32_t index_count) {
+    GLint previous_vertex_array = 0;
+    GLint previous_array_buffer = 0;
+    GLint previous_element_buffer = 0;
+    glGetIntegerv(GL_VERTEX_ARRAY_BINDING, &previous_vertex_array);
+    glGetIntegerv(GL_ARRAY_BUFFER_BINDING, &previous_array_buffer);
+    glGetIntegerv(GL_ELEMENT_ARRAY_BUFFER_BINDING,
+                  &previous_element_buffer);
+
+    /* GL_ELEMENT_ARRAY_BUFFER is VAO state. Scene query events arrive between
+     * game frames, while the SM64 renderer's VAO may still be bound. Upload
+     * through VAO 0 so creating the room mesh cannot replace the game's EBO. */
+    glBindVertexArray(0);
+    glGenBuffers(1, &mesh->vertex_buffer);
+    glBindBuffer(GL_ARRAY_BUFFER, mesh->vertex_buffer);
+    glBufferData(GL_ARRAY_BUFFER, vertex_count * sizeof(*vertices),
+                 vertices, GL_STATIC_DRAW);
+    glGenBuffers(1, &mesh->index_buffer);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->index_buffer);
+    glBufferData(GL_ELEMENT_ARRAY_BUFFER, index_count * sizeof(*indices),
+                 indices, GL_STATIC_DRAW);
+
+    glBindBuffer(GL_ARRAY_BUFFER, (GLuint)previous_array_buffer);
+    glBindVertexArray((GLuint)previous_vertex_array);
+    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER,
+                 (GLuint)previous_element_buffer);
+}
+
 static bool load_room_mesh(QuestApp *app, XrSpace space) {
     for (uint32_t i = 0; i < app->room_mesh_count; ++i) {
         if (app->room_meshes[i].space == space) return true;
@@ -1874,17 +1905,8 @@ static bool load_room_mesh(QuestApp *app, XrSpace space) {
     QuestRoomMesh *mesh = &app->room_meshes[app->room_mesh_count];
     mesh->space = space;
     mesh->index_count = index_count;
-    glGenBuffers(1, &mesh->vertex_buffer);
-    glBindBuffer(GL_ARRAY_BUFFER, mesh->vertex_buffer);
-    glBufferData(GL_ARRAY_BUFFER,
-                 room.vertexCountOutput * sizeof(*vertices), vertices,
-                 GL_STATIC_DRAW);
-    glGenBuffers(1, &mesh->index_buffer);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->index_buffer);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-                 index_count * sizeof(*indices), indices, GL_STATIC_DRAW);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    upload_scene_mesh_buffers(
+        mesh, vertices, room.vertexCountOutput, indices, index_count);
     free(indices);
     free(vertices);
     ++app->room_mesh_count;
@@ -1945,18 +1967,9 @@ static bool load_triangle_mesh(QuestApp *app, XrSpace space) {
     QuestRoomMesh *mesh = &app->room_meshes[app->room_mesh_count];
     mesh->space = space;
     mesh->index_count = triangle.indexCountOutput;
-    glGenBuffers(1, &mesh->vertex_buffer);
-    glBindBuffer(GL_ARRAY_BUFFER, mesh->vertex_buffer);
-    glBufferData(GL_ARRAY_BUFFER,
-                 triangle.vertexCountOutput * sizeof(*vertices), vertices,
-                 GL_STATIC_DRAW);
-    glGenBuffers(1, &mesh->index_buffer);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh->index_buffer);
-    glBufferData(GL_ELEMENT_ARRAY_BUFFER,
-                 triangle.indexCountOutput * sizeof(*indices), indices,
-                 GL_STATIC_DRAW);
-    glBindBuffer(GL_ARRAY_BUFFER, 0);
-    glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
+    upload_scene_mesh_buffers(
+        mesh, vertices, triangle.vertexCountOutput,
+        indices, triangle.indexCountOutput);
     free(vertices);
     free(indices);
     ++app->room_mesh_count;
