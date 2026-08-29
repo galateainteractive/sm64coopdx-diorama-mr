@@ -78,6 +78,8 @@ static u8 sVrLateralSideFlipRequestTicks = 0;
 static struct Object *sVrTwirlTornado = NULL;
 static bool sVrTabletopMovementYawValid = false;
 static s16 sVrTabletopMovementYaw = 0;
+static bool sVrTabletopHeadYawValid = false;
+static s16 sVrTabletopHeadYaw = 0;
 
 static void vr_update_twirl_tornado_effect(struct MarioState *m) {
     if (m == NULL || m->playerIndex != 0) {
@@ -2327,6 +2329,7 @@ void update_mario_joystick_inputs(struct MarioState *m) {
         // A fresh Tabletop entry captures the direction that currently feels
         // natural, then keeps it stable until the player leaves the mode.
         sVrTabletopMovementYawValid = false;
+        sVrTabletopHeadYawValid = false;
     }
 
     if (m->squishTimer == 0) {
@@ -2355,26 +2358,38 @@ void update_mario_joystick_inputs(struct MarioState *m) {
         }
 
         if (tabletopMovement) {
-            s16 headYaw = 0;
-            vr_get_first_person_raw_head_yaw(&headYaw);
-            if (!sVrTabletopMovementYawValid) {
+            s16 sampledHeadYaw = 0;
+            if (vr_get_first_person_raw_head_yaw(&sampledHeadYaw)) {
+                // Looking almost vertically at a tabletop makes the HMD's
+                // forward vector lose a meaningful horizontal yaw. Preserve
+                // the last good sample through that singularity and through
+                // brief OpenXR tracking gaps instead of injecting yaw zero.
+                sVrTabletopHeadYaw = sampledHeadYaw;
+                sVrTabletopHeadYawValid = true;
+            }
+
+            if (!sVrTabletopMovementYawValid &&
+                sVrTabletopHeadYawValid) {
                 // Rendering cancels the Mario-following game camera in
                 // Tabletop, so its later automatic turns must not silently
                 // rotate locomotion. Preserve only the initial camera-to-world
                 // basis, excluding the current tracked head yaw, then reuse it
                 // across doors, warps, and camera triggers.
                 sVrTabletopMovementYaw =
-                    (s16)(m->intendedYaw - stickYaw - headYaw);
+                    (s16)(m->intendedYaw - stickYaw -
+                          sVrTabletopHeadYaw);
                 sVrTabletopMovementYawValid = true;
             }
-            // Tabletop locomotion follows the user's horizontal gaze. Walking
-            // around the miniature and turning back toward it therefore turns
-            // stick-forward with the observer, while pitch/roll are ignored.
-            // Undo the render-only tabletop yaw as well so rotating the
-            // miniature cannot separate visual forward from gameplay forward.
-            m->intendedYaw =
-                stickYaw + sVrTabletopMovementYaw + headYaw -
-                vr_get_tabletop_world_yaw();
+
+            if (sVrTabletopMovementYawValid) {
+                // Sample render yaw once for this gameplay tick. Tabletop
+                // locomotion follows horizontal gaze, while render-only model
+                // rotation is removed from the gameplay direction.
+                const s16 tabletopYaw = vr_get_tabletop_world_yaw();
+                m->intendedYaw =
+                    stickYaw + sVrTabletopMovementYaw +
+                    sVrTabletopHeadYaw - tabletopYaw;
+            }
         }
 
         if (vr_is_active() &&
