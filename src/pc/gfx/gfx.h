@@ -43,6 +43,7 @@ struct Box {
 struct GfxVertex {
     float x, y, z, w;
     float u, v;
+    float tabletop_fade;
     struct RGBA color;
     uint8_t fog_z;
     uint8_t clip_rej;
