@@ -82,8 +82,8 @@ static u8 sVrLateralSideFlipRequestTicks = 0;
 static struct Object *sVrTwirlTornado = NULL;
 static bool sVrTabletopMovementYawValid = false;
 static s16 sVrTabletopMovementYaw = 0;
-static bool sVrTabletopHeadYawValid = false;
-static s16 sVrTabletopHeadYaw = 0;
+static bool sVrTabletopObserverYawValid = false;
+static s16 sVrTabletopObserverYaw = 0;
 
 #ifdef __ANDROID__
 static void vr_log_tabletop_input_diagnostics(
@@ -111,7 +111,7 @@ static void vr_log_tabletop_input_diagnostics(
         ANDROID_LOG_INFO,
         "TabletopInput",
         "t=%u lvl=%d area=%d action=%08X stick=(%.1f,%.1f) "
-        "stickYaw=%d headYaw=%d headValid=%d hproj=%.5f "
+        "stickYaw=%d observerYaw=%d observerValid=%d hproj=%.5f "
         "tableYaw=%d baseYaw=%d finalYaw=%d cameraYaw=%d "
         "lakituYaw=%d newcamYaw=%d trackingGen=%u",
         gGlobalTimer,
@@ -121,8 +121,8 @@ static void vr_log_tabletop_input_diagnostics(
         m->controller->stickX,
         m->controller->stickY,
         stickYaw,
-        sVrTabletopHeadYaw,
-        sVrTabletopHeadYawValid,
+        sVrTabletopObserverYaw,
+        sVrTabletopObserverYawValid,
         horizontalProjection,
         tabletopYaw,
         sVrTabletopMovementYaw,
@@ -242,6 +242,32 @@ static bool vr_get_first_person_raw_head_yaw(s16* yaw) {
             rotation,
             yaw
         );
+}
+
+static bool vr_get_tabletop_observer_yaw(s16* yaw) {
+    if (yaw == NULL) {
+        return false;
+    }
+
+    float headPosition[3] = { 0 };
+    float tabletopCenter[3] = { 0 };
+    if (!vr_get_head_translation(headPosition) ||
+        !vr_get_tabletop_center_tracking_position(tabletopCenter)) {
+        return false;
+    }
+
+    const float towardCenterX = tabletopCenter[0] - headPosition[0];
+    const float towardCenterZ = tabletopCenter[2] - headPosition[2];
+    const float horizontalDistanceSquared =
+        towardCenterX * towardCenterX + towardCenterZ * towardCenterZ;
+    if (horizontalDistanceSquared < 0.0225f) {
+        // Within 15 cm of the pivot there is no meaningful side of the table.
+        // Retain the last good observer basis rather than letting noise flip it.
+        return false;
+    }
+
+    *yaw = (s16)-atan2s(-towardCenterZ, towardCenterX);
+    return true;
 }
 
 static bool vr_get_first_person_facing_rotation(
@@ -2385,7 +2411,7 @@ void update_mario_joystick_inputs(struct MarioState *m) {
         // A fresh Tabletop entry captures the direction that currently feels
         // natural, then keeps it stable until the player leaves the mode.
         sVrTabletopMovementYawValid = false;
-        sVrTabletopHeadYawValid = false;
+        sVrTabletopObserverYawValid = false;
     }
 
     if (m->squishTimer == 0) {
@@ -2414,18 +2440,19 @@ void update_mario_joystick_inputs(struct MarioState *m) {
         }
 
         if (tabletopMovement) {
-            s16 sampledHeadYaw = 0;
-            if (vr_get_first_person_raw_head_yaw(&sampledHeadYaw)) {
-                // Looking almost vertically at a tabletop makes the HMD's
-                // forward vector lose a meaningful horizontal yaw. Preserve
-                // the last good sample through that singularity and through
-                // brief OpenXR tracking gaps instead of injecting yaw zero.
-                sVrTabletopHeadYaw = sampledHeadYaw;
-                sVrTabletopHeadYawValid = true;
+            s16 sampledObserverYaw = 0;
+            if (vr_get_tabletop_observer_yaw(&sampledObserverYaw)) {
+                // Use which side of the miniature the player occupies, not
+                // the direction their head happens to point. Looking aside
+                // stays stable, while physically walking around the table
+                // rotates the controls naturally. Brief pose gaps preserve
+                // the last valid room-space observer basis.
+                sVrTabletopObserverYaw = sampledObserverYaw;
+                sVrTabletopObserverYawValid = true;
             }
 
             if (!sVrTabletopMovementYawValid &&
-                sVrTabletopHeadYawValid) {
+                sVrTabletopObserverYawValid) {
                 // Rendering cancels the Mario-following game camera in
                 // Tabletop, so its later automatic turns must not silently
                 // rotate locomotion. Preserve only the initial camera-to-world
@@ -2433,18 +2460,18 @@ void update_mario_joystick_inputs(struct MarioState *m) {
                 // across doors, warps, and camera triggers.
                 sVrTabletopMovementYaw =
                     (s16)(m->intendedYaw - stickYaw -
-                          sVrTabletopHeadYaw);
+                          sVrTabletopObserverYaw);
                 sVrTabletopMovementYawValid = true;
             }
 
             if (sVrTabletopMovementYawValid) {
-                // Sample render yaw once for this gameplay tick. Tabletop
-                // locomotion follows horizontal gaze, while render-only model
-                // rotation is removed from the gameplay direction.
+                // Sample render yaw once for this gameplay tick. Observer
+                // position supplies the room-relative view, while render-only
+                // model rotation is removed from the gameplay direction.
                 const s16 tabletopYaw = vr_get_tabletop_world_yaw();
                 m->intendedYaw =
                     stickYaw + sVrTabletopMovementYaw +
-                    sVrTabletopHeadYaw - tabletopYaw;
+                    sVrTabletopObserverYaw - tabletopYaw;
 
 #ifdef __ANDROID__
                 vr_log_tabletop_input_diagnostics(

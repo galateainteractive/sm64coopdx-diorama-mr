@@ -2975,6 +2975,21 @@ s16 vr_get_tabletop_world_yaw(void) {
     return sVrTabletopWorldYaw;
 }
 
+bool vr_get_tabletop_center_tracking_position(float outPosition[3]) {
+    if (outPosition == NULL || configVrCameraMode != VR_CAMERA_MODE_TABLETOP ||
+        !sVrTabletopAnchorValid) {
+        return false;
+    }
+
+    // The static-geometry anchor maps exactly to this room-space point in
+    // vr_build_tabletop_transform. Expose it as the stable observer pivot
+    // without involving Mario, the gameplay camera, or render interpolation.
+    outPosition[0] = sVrTabletopUserOffset[0];
+    outPosition[1] = -VR_TABLETOP_DOWN_METERS + sVrTabletopUserOffset[1];
+    outPosition[2] = -VR_TABLETOP_FORWARD_METERS + sVrTabletopUserOffset[2];
+    return true;
+}
+
 bool vr_get_tabletop_mario_tracking_position(float outPosition[3]) {
     if (outPosition == NULL || configVrCameraMode != VR_CAMERA_MODE_TABLETOP ||
         !sVrTabletopAnchorValid || gMarioStates[0].marioObj == NULL) {

@@ -60,6 +60,7 @@ bool vr_align_first_person_camera_yaw(s16 worldYaw);
 void vr_request_first_person_camera_yaw_alignment(s16 worldYaw);
 s16 vr_get_first_person_action_turn_yaw(void);
 s16 vr_get_tabletop_world_yaw(void);
+bool vr_get_tabletop_center_tracking_position(float outPosition[3]);
 bool vr_get_tabletop_mario_tracking_position(float outPosition[3]);
 bool vr_get_controller_world_fist(
     u32 handIndex,
