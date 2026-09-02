@@ -37,7 +37,10 @@ extern bool quest_vr_bridge_recentered_to_local(
 #define QUEST_VIEW_COUNT 2U
 #define QUEST_DEFAULT_RENDER_SCALE_PERCENT 80U
 #define QUEST_PASSTHROUGH_LUT_RESOLUTION 32U
+#define QUEST_DAMAGE_PULSE_DURATION_NS 700000000LL
+#define QUEST_HEAL_PULSE_DURATION_NS 1100000000LL
 #define QUEST_STAR_PULSE_DURATION_NS 2200000000LL
+#define QUEST_CAP_STYLE_WEIGHT 0.78f
 #define QUEST_ROOM_PULSE_DURATION_NS 5000000000LL
 #define QUEST_ROOM_MESH_MAX 4U
 #define QUEST_ROOM_PULSE_ENABLED 0
@@ -98,9 +101,35 @@ static const QuestPassthroughThemeStyle sPassthroughThemeStyles[] = {
     },
 };
 
-static const QuestPassthroughThemeStyle sStarPulseStyle = {
-    {1.82f, 1.28f, 0.04f}, 0.96f, 0.18f, 0.24f, 1.38f,
-    {1.00f, 0.78f, 0.08f, 0.95f},
+static const QuestPassthroughThemeStyle sPassthroughEffectStyles[] = {
+    [QUEST_PASSTHROUGH_EFFECT_NONE] = {
+        {1.00f, 1.00f, 1.00f}, 0.00f, 0.00f, 0.02f, 1.00f,
+        {0.80f, 0.85f, 1.00f, 0.05f},
+    },
+    [QUEST_PASSTHROUGH_EFFECT_DAMAGE] = {
+        {1.95f, 0.10f, 0.06f}, 0.98f, 0.08f, 0.28f, 1.44f,
+        {1.00f, 0.02f, 0.01f, 0.96f},
+    },
+    [QUEST_PASSTHROUGH_EFFECT_HEAL] = {
+        {0.16f, 1.86f, 0.28f}, 0.92f, 0.14f, 0.18f, 1.34f,
+        {0.06f, 1.00f, 0.18f, 0.92f},
+    },
+    [QUEST_PASSTHROUGH_EFFECT_STAR] = {
+        {1.82f, 1.28f, 0.04f}, 0.96f, 0.18f, 0.24f, 1.38f,
+        {1.00f, 0.78f, 0.08f, 0.95f},
+    },
+    [QUEST_PASSTHROUGH_EFFECT_WING_CAP] = {
+        {1.62f, 0.46f, 0.18f}, 0.76f, 0.06f, 0.14f, 1.30f,
+        {1.00f, 0.24f, 0.06f, 0.58f},
+    },
+    [QUEST_PASSTHROUGH_EFFECT_METAL_CAP] = {
+        {0.82f, 1.02f, 1.20f}, 0.46f, 0.04f, 0.24f, 0.22f,
+        {0.72f, 0.90f, 1.00f, 0.54f},
+    },
+    [QUEST_PASSTHROUGH_EFFECT_VANISH_CAP] = {
+        {0.64f, 0.24f, 1.74f}, 0.82f, -0.05f, 0.20f, 1.02f,
+        {0.62f, 0.08f, 1.00f, 0.62f},
+    },
 };
 
 typedef struct QuestSwapchain {
@@ -178,11 +207,13 @@ typedef struct QuestApp {
     PFN_xrDestroyPassthroughColorLutMETA destroy_passthrough_color_lut;
     PFN_xrUpdatePassthroughColorLutMETA update_passthrough_color_lut;
     XrPassthroughColorLutMETA theme_color_lut;
-    XrPassthroughColorLutMETA star_color_lut;
+    XrPassthroughColorLutMETA effect_color_lut;
     enum QuestPassthroughTheme active_passthrough_theme;
-    uint32_t observed_star_collection_serial;
-    XrTime star_pulse_start_time;
-    float applied_star_pulse_weight;
+    enum QuestPassthroughEffect active_passthrough_effect;
+    enum QuestPassthroughEffect active_cap_effect;
+    uint32_t observed_passthrough_effect_serial;
+    XrTime passthrough_effect_start_time;
+    float applied_passthrough_effect_weight;
     PFN_xrEnumerateRenderModelPathsFB enumerate_render_model_paths;
     PFN_xrGetRenderModelPropertiesFB get_render_model_properties;
     PFN_xrLoadRenderModelFB load_render_model;
@@ -834,6 +865,74 @@ static const char *passthrough_theme_name(
     return names[theme];
 }
 
+static const QuestPassthroughThemeStyle *passthrough_effect_style(
+    enum QuestPassthroughEffect effect
+) {
+    if (effect < QUEST_PASSTHROUGH_EFFECT_NONE ||
+        effect > QUEST_PASSTHROUGH_EFFECT_VANISH_CAP) {
+        effect = QUEST_PASSTHROUGH_EFFECT_NONE;
+    }
+    return &sPassthroughEffectStyles[effect];
+}
+
+static const char *passthrough_effect_name(
+    enum QuestPassthroughEffect effect
+) {
+    static const char *names[] = {
+        "none", "damage", "heal", "star",
+        "wing cap", "metal cap", "vanish cap",
+    };
+    if (effect < QUEST_PASSTHROUGH_EFFECT_NONE ||
+        effect > QUEST_PASSTHROUGH_EFFECT_VANISH_CAP) {
+        return "unknown";
+    }
+    return names[effect];
+}
+
+static QuestPassthroughThemeStyle blend_passthrough_styles(
+    const QuestPassthroughThemeStyle *source,
+    const QuestPassthroughThemeStyle *target,
+    float weight
+) {
+    QuestPassthroughThemeStyle blended;
+    for (uint32_t channel = 0; channel < 3; ++channel) {
+        blended.tint[channel] = source->tint[channel] +
+            (target->tint[channel] - source->tint[channel]) * weight;
+    }
+    blended.strength = source->strength +
+        (target->strength - source->strength) * weight;
+    blended.brightness = source->brightness +
+        (target->brightness - source->brightness) * weight;
+    blended.contrast = source->contrast +
+        (target->contrast - source->contrast) * weight;
+    blended.saturation = source->saturation +
+        (target->saturation - source->saturation) * weight;
+    blended.edge_color.r = source->edge_color.r +
+        (target->edge_color.r - source->edge_color.r) * weight;
+    blended.edge_color.g = source->edge_color.g +
+        (target->edge_color.g - source->edge_color.g) * weight;
+    blended.edge_color.b = source->edge_color.b +
+        (target->edge_color.b - source->edge_color.b) * weight;
+    blended.edge_color.a = source->edge_color.a +
+        (target->edge_color.a - source->edge_color.a) * weight;
+    return blended;
+}
+
+static XrDuration passthrough_effect_duration(
+    enum QuestPassthroughEffect effect
+) {
+    switch (effect) {
+        case QUEST_PASSTHROUGH_EFFECT_DAMAGE:
+            return QUEST_DAMAGE_PULSE_DURATION_NS;
+        case QUEST_PASSTHROUGH_EFFECT_HEAL:
+            return QUEST_HEAL_PULSE_DURATION_NS;
+        case QUEST_PASSTHROUGH_EFFECT_STAR:
+            return QUEST_STAR_PULSE_DURATION_NS;
+        default:
+            return 0;
+    }
+}
+
 static void build_passthrough_color_lut(
     const QuestPassthroughThemeStyle *style,
     uint8_t *buffer
@@ -926,9 +1025,11 @@ static void initialize_passthrough_styling(QuestApp *app) {
         app->set_passthrough_style != NULL;
     app->active_passthrough_theme =
         (enum QuestPassthroughTheme)-1;
-    app->applied_star_pulse_weight = -1.0f;
-    app->observed_star_collection_serial =
-        quest_game_star_collection_serial();
+    app->active_passthrough_effect = QUEST_PASSTHROUGH_EFFECT_NONE;
+    app->active_cap_effect = (enum QuestPassthroughEffect)-1;
+    app->applied_passthrough_effect_weight = -1.0f;
+    app->observed_passthrough_effect_serial =
+        quest_game_passthrough_effect_serial();
 
     if (!app->passthrough_style_supported ||
         !app->passthrough_color_lut_supported) {
@@ -956,14 +1057,16 @@ static void initialize_passthrough_styling(QuestApp *app) {
             passthrough_theme_style(QUEST_PASSTHROUGH_THEME_NEUTRAL),
             &app->theme_color_lut) ||
         !create_passthrough_color_lut(
-            app, &sStarPulseStyle, &app->star_color_lut)) {
+            app,
+            passthrough_effect_style(QUEST_PASSTHROUGH_EFFECT_STAR),
+            &app->effect_color_lut)) {
         if (app->theme_color_lut != XR_NULL_HANDLE) {
             app->destroy_passthrough_color_lut(app->theme_color_lut);
             app->theme_color_lut = XR_NULL_HANDLE;
         }
-        if (app->star_color_lut != XR_NULL_HANDLE) {
-            app->destroy_passthrough_color_lut(app->star_color_lut);
-            app->star_color_lut = XR_NULL_HANDLE;
+        if (app->effect_color_lut != XR_NULL_HANDLE) {
+            app->destroy_passthrough_color_lut(app->effect_color_lut);
+            app->effect_color_lut = XR_NULL_HANDLE;
         }
         app->passthrough_color_lut_supported = false;
         LOGI("Passthrough color LUT creation failed; using basic styling.");
@@ -972,18 +1075,20 @@ static void initialize_passthrough_styling(QuestApp *app) {
     LOGI("Passthrough styling path: advanced META color LUT.");
 }
 
-static float passthrough_star_pulse_weight(
+static float passthrough_effect_weight(
     QuestApp *app,
     XrTime display_time
 ) {
-    if (app->star_pulse_start_time == 0 ||
-        display_time <= app->star_pulse_start_time) {
-        return app->star_pulse_start_time == 0 ? 0.0f : 0.01f;
+    const XrDuration duration = passthrough_effect_duration(
+        app->active_passthrough_effect);
+    if (duration <= 0 || app->passthrough_effect_start_time == 0 ||
+        display_time <= app->passthrough_effect_start_time) {
+        return app->passthrough_effect_start_time == 0 ? 0.0f : 0.01f;
     }
-    const XrDuration elapsed = display_time - app->star_pulse_start_time;
-    if (elapsed >= QUEST_STAR_PULSE_DURATION_NS) return 0.0f;
-    const float progress = (float)elapsed /
-        (float)QUEST_STAR_PULSE_DURATION_NS;
+    const XrDuration elapsed =
+        display_time - app->passthrough_effect_start_time;
+    if (elapsed >= duration) return 0.0f;
+    const float progress = (float)elapsed / (float)duration;
     float weight;
     if (progress < 0.14f) {
         weight = progress / 0.14f;
@@ -1003,58 +1108,90 @@ static void update_passthrough_style(
     enum QuestPassthroughTheme theme = quest_game_passthrough_theme();
     const QuestPassthroughThemeStyle *theme_style =
         passthrough_theme_style(theme);
+    const enum QuestPassthroughEffect cap_effect =
+        quest_game_passthrough_cap_effect();
     const bool theme_changed =
         theme != app->active_passthrough_theme;
-    if (theme_changed) {
-        LOGI("Passthrough theme: %s (%s path).",
+    const bool cap_changed = cap_effect != app->active_cap_effect;
+    QuestPassthroughThemeStyle base_style = *theme_style;
+    if (cap_effect != QUEST_PASSTHROUGH_EFFECT_NONE) {
+        base_style = blend_passthrough_styles(
+            theme_style,
+            passthrough_effect_style(cap_effect),
+            QUEST_CAP_STYLE_WEIGHT);
+    }
+
+    if (theme_changed || cap_changed) {
+        LOGI("Passthrough theme: %s, cap: %s (%s path).",
              passthrough_theme_name(theme),
+             passthrough_effect_name(cap_effect),
              app->passthrough_color_lut_supported ? "META LUT" : "basic");
     }
-    if (theme_changed && app->passthrough_color_lut_supported &&
+    if ((theme_changed || cap_changed) &&
+        app->passthrough_color_lut_supported &&
         !update_passthrough_color_lut(
-            app, theme_style, app->theme_color_lut)) {
+            app, &base_style, app->theme_color_lut)) {
         app->passthrough_color_lut_supported = false;
         LOGI("Passthrough LUT update failed; using basic styling.");
     }
     app->active_passthrough_theme = theme;
+    app->active_cap_effect = cap_effect;
 
-    const uint32_t star_serial = quest_game_star_collection_serial();
-    if (star_serial != app->observed_star_collection_serial) {
-        app->observed_star_collection_serial = star_serial;
-        app->star_pulse_start_time = display_time;
+    const uint32_t effect_serial =
+        quest_game_passthrough_effect_serial();
+    if (effect_serial != app->observed_passthrough_effect_serial) {
+        app->observed_passthrough_effect_serial = effect_serial;
+        app->active_passthrough_effect =
+            quest_game_passthrough_effect();
+        app->passthrough_effect_start_time = display_time;
+        LOGI("Passthrough effect: %s.",
+             passthrough_effect_name(app->active_passthrough_effect));
+        if (app->passthrough_color_lut_supported &&
+            !update_passthrough_color_lut(
+                app,
+                passthrough_effect_style(app->active_passthrough_effect),
+                app->effect_color_lut)) {
+            app->passthrough_color_lut_supported = false;
+            LOGI("Passthrough effect LUT update failed; using basic styling.");
+        }
     }
-    const float pulse = passthrough_star_pulse_weight(app, display_time);
-    if (!theme_changed && pulse == 0.0f &&
-        app->applied_star_pulse_weight == 0.0f) return;
+    const float effect_weight =
+        passthrough_effect_weight(app, display_time);
+    if (!theme_changed && !cap_changed && effect_weight == 0.0f &&
+        app->applied_passthrough_effect_weight == 0.0f) return;
+
+    const QuestPassthroughThemeStyle *effect_style =
+        passthrough_effect_style(app->active_passthrough_effect);
 
     XrPassthroughStyleFB style = {
         .type = XR_TYPE_PASSTHROUGH_STYLE_FB,
         .textureOpacityFactor = 1.0f,
         .edgeColor = {
-            theme_style->edge_color.r +
-                (sStarPulseStyle.edge_color.r - theme_style->edge_color.r) * pulse,
-            theme_style->edge_color.g +
-                (sStarPulseStyle.edge_color.g - theme_style->edge_color.g) * pulse,
-            theme_style->edge_color.b +
-                (sStarPulseStyle.edge_color.b - theme_style->edge_color.b) * pulse,
-            theme_style->edge_color.a +
-                (sStarPulseStyle.edge_color.a - theme_style->edge_color.a) * pulse,
+            base_style.edge_color.r +
+                (effect_style->edge_color.r - base_style.edge_color.r) * effect_weight,
+            base_style.edge_color.g +
+                (effect_style->edge_color.g - base_style.edge_color.g) * effect_weight,
+            base_style.edge_color.b +
+                (effect_style->edge_color.b - base_style.edge_color.b) * effect_weight,
+            base_style.edge_color.a +
+                (effect_style->edge_color.a - base_style.edge_color.a) * effect_weight,
         },
     };
     XrPassthroughColorMapInterpolatedLutMETA lut_map = {
         .type = XR_TYPE_PASSTHROUGH_COLOR_MAP_INTERPOLATED_LUT_META,
         .sourceColorLut = app->theme_color_lut,
-        .targetColorLut = app->star_color_lut,
-        .weight = pulse,
+        .targetColorLut = app->effect_color_lut,
+        .weight = effect_weight,
     };
     XrPassthroughBrightnessContrastSaturationFB adjustment = {
         .type = XR_TYPE_PASSTHROUGH_BRIGHTNESS_CONTRAST_SATURATION_FB,
-        .brightness = (theme_style->brightness +
-            (sStarPulseStyle.brightness - theme_style->brightness) * pulse) * 100.0f,
-        .contrast = 1.0f + theme_style->contrast +
-            (sStarPulseStyle.contrast - theme_style->contrast) * pulse,
-        .saturation = theme_style->saturation +
-            (sStarPulseStyle.saturation - theme_style->saturation) * pulse,
+        .brightness = (base_style.brightness +
+            (effect_style->brightness - base_style.brightness) *
+                effect_weight) * 100.0f,
+        .contrast = 1.0f + base_style.contrast +
+            (effect_style->contrast - base_style.contrast) * effect_weight,
+        .saturation = base_style.saturation +
+            (effect_style->saturation - base_style.saturation) * effect_weight,
     };
     style.next = app->passthrough_color_lut_supported
         ? (const void *)&lut_map
@@ -1067,7 +1204,7 @@ static void update_passthrough_style(
         app->passthrough_style_supported = false;
         return;
     }
-    app->applied_star_pulse_weight = pulse;
+    app->applied_passthrough_effect_weight = effect_weight;
 }
 
 static void initialize_passthrough(QuestApp *app) {
@@ -1153,7 +1290,7 @@ static bool update_passthrough_state(QuestApp *app) {
             return false;
         }
         app->passthrough_active = true;
-        app->applied_star_pulse_weight = -1.0f;
+        app->applied_passthrough_effect_weight = -1.0f;
         LOGI("Tabletop MR passthrough activated.");
     } else {
         app->pause_passthrough_layer(app->passthrough_layer);
@@ -2212,7 +2349,8 @@ static void start_room_pulse(
     if (manual_test) {
         /* The passthrough LUT flash acknowledges the button even if Scene
          * data was unavailable, separating input failure from mesh failure. */
-        app->star_pulse_start_time = display_time;
+        app->active_passthrough_effect = QUEST_PASSTHROUGH_EFFECT_STAR;
+        app->passthrough_effect_start_time = display_time;
     }
     LOGI("%s Room Mesh pulse started at %.2f, %.2f, %.2f; %u room(s) loaded.",
          manual_test ? "Manual" : "Star",
@@ -2710,9 +2848,9 @@ static void destroy_quest_app(QuestApp *app) {
             app->destroy_passthrough_color_lut(app->theme_color_lut);
             app->theme_color_lut = XR_NULL_HANDLE;
         }
-        if (app->star_color_lut != XR_NULL_HANDLE) {
-            app->destroy_passthrough_color_lut(app->star_color_lut);
-            app->star_color_lut = XR_NULL_HANDLE;
+        if (app->effect_color_lut != XR_NULL_HANDLE) {
+            app->destroy_passthrough_color_lut(app->effect_color_lut);
+            app->effect_color_lut = XR_NULL_HANDLE;
         }
     }
     if (app->passthrough != XR_NULL_HANDLE

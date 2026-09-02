@@ -1,5 +1,7 @@
 #include "quest_game_runtime.h"
 
+#include "sm64.h"
+
 #include <android/log.h>
 #include <GLES3/gl3.h>
 #include <stdio.h>
@@ -423,6 +425,39 @@ enum QuestPassthroughTheme quest_game_passthrough_theme(void) {
 
 uint32_t quest_game_star_collection_serial(void) {
     return vr_get_star_collection_serial();
+}
+
+enum QuestPassthroughEffect quest_game_passthrough_effect(void) {
+    switch (vr_get_passthrough_effect()) {
+        case VR_PASSTHROUGH_EFFECT_DAMAGE:
+            return QUEST_PASSTHROUGH_EFFECT_DAMAGE;
+        case VR_PASSTHROUGH_EFFECT_HEAL:
+            return QUEST_PASSTHROUGH_EFFECT_HEAL;
+        case VR_PASSTHROUGH_EFFECT_STAR:
+            return QUEST_PASSTHROUGH_EFFECT_STAR;
+        default:
+            return QUEST_PASSTHROUGH_EFFECT_NONE;
+    }
+}
+
+uint32_t quest_game_passthrough_effect_serial(void) {
+    return vr_get_passthrough_effect_serial();
+}
+
+enum QuestPassthroughEffect quest_game_passthrough_cap_effect(void) {
+    if (!sReady || gMarioState == NULL || gMarioState->capTimer <= 0) {
+        return QUEST_PASSTHROUGH_EFFECT_NONE;
+    }
+    if (gMarioState->flags & MARIO_METAL_CAP) {
+        return QUEST_PASSTHROUGH_EFFECT_METAL_CAP;
+    }
+    if (gMarioState->flags & MARIO_VANISH_CAP) {
+        return QUEST_PASSTHROUGH_EFFECT_VANISH_CAP;
+    }
+    if (gMarioState->flags & MARIO_WING_CAP) {
+        return QUEST_PASSTHROUGH_EFFECT_WING_CAP;
+    }
+    return QUEST_PASSTHROUGH_EFFECT_NONE;
 }
 
 bool quest_game_tabletop_mario_tracking_position(float out_position[3]) {

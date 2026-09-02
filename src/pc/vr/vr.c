@@ -12,6 +12,9 @@ static bool sPhysicalPunchPending[VR_CONTROLLER_COUNT] = {
     false
 };
 static uint32_t sStarCollectionSerial = 0;
+static enum VrPassthroughEffect sPassthroughEffect =
+    VR_PASSTHROUGH_EFFECT_NONE;
+static uint32_t sPassthroughEffectSerial = 0;
 
 static void vr_clear_physical_punches(void) {
     for (uint32_t hand = 0;
@@ -254,10 +257,28 @@ bool vr_consume_physical_punch(uint32_t handIndex) {
 
 void vr_notify_star_collected(void) {
     sStarCollectionSerial++;
+    vr_notify_passthrough_effect(VR_PASSTHROUGH_EFFECT_STAR);
 }
 
 uint32_t vr_get_star_collection_serial(void) {
     return sStarCollectionSerial;
+}
+
+void vr_notify_passthrough_effect(enum VrPassthroughEffect effect) {
+    if (effect <= VR_PASSTHROUGH_EFFECT_NONE ||
+        effect > VR_PASSTHROUGH_EFFECT_STAR) {
+        return;
+    }
+    sPassthroughEffect = effect;
+    sPassthroughEffectSerial++;
+}
+
+enum VrPassthroughEffect vr_get_passthrough_effect(void) {
+    return sPassthroughEffect;
+}
+
+uint32_t vr_get_passthrough_effect_serial(void) {
+    return sPassthroughEffectSerial;
 }
 
 void vr_shutdown(void) {

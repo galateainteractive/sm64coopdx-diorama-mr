@@ -934,6 +934,10 @@ u32 take_damage_from_interact_object(struct MarioState *m) {
 
     m->hurtCounter += 4 * damage;
 
+    if (m->playerIndex == 0 && damage > 0) {
+        vr_notify_passthrough_effect(VR_PASSTHROUGH_EFFECT_DAMAGE);
+    }
+
     queue_rumble_data_mario(m, 5, 80);
     if (m->playerIndex == 0) { set_camera_shake_from_hit(shake); }
     return damage;

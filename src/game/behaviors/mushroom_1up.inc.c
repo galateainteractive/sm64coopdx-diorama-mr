@@ -5,6 +5,7 @@ void bhv_1up_interact(void) {
     if (marioState && marioState->playerIndex == 0 && obj_check_if_collided_with_object(o, marioState->marioObj) == 1) {
         play_sound(SOUND_GENERAL_COLLECT_1UP, gGlobalSoundSource);
         marioState->numLives++;
+        vr_notify_passthrough_effect(VR_PASSTHROUGH_EFFECT_HEAL);
         o->activeFlags = ACTIVE_FLAG_DEACTIVATED;
         if (gLevelValues.mushroom1UpHeal) {
             marioState->healCounter = 31;

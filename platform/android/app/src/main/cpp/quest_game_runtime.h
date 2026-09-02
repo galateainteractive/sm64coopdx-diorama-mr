@@ -15,6 +15,16 @@ enum QuestPassthroughTheme {
     QUEST_PASSTHROUGH_THEME_SPOOKY,
 };
 
+enum QuestPassthroughEffect {
+    QUEST_PASSTHROUGH_EFFECT_NONE = 0,
+    QUEST_PASSTHROUGH_EFFECT_DAMAGE,
+    QUEST_PASSTHROUGH_EFFECT_HEAL,
+    QUEST_PASSTHROUGH_EFFECT_STAR,
+    QUEST_PASSTHROUGH_EFFECT_WING_CAP,
+    QUEST_PASSTHROUGH_EFFECT_METAL_CAP,
+    QUEST_PASSTHROUGH_EFFECT_VANISH_CAP,
+};
+
 bool quest_game_initialize(void);
 void quest_game_load_early_config(void);
 void quest_game_flush_persistent_state(void);
@@ -30,5 +40,8 @@ bool quest_game_is_ready(void);
 bool quest_game_tabletop_mr_requested(void);
 enum QuestPassthroughTheme quest_game_passthrough_theme(void);
 uint32_t quest_game_star_collection_serial(void);
+enum QuestPassthroughEffect quest_game_passthrough_effect(void);
+uint32_t quest_game_passthrough_effect_serial(void);
+enum QuestPassthroughEffect quest_game_passthrough_cap_effect(void);
 bool quest_game_tabletop_mario_tracking_position(float out_position[3]);
 bool quest_game_room_pulse_test_requested(void);

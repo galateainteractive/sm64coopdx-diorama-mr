@@ -11,6 +11,13 @@ enum VrControllerHand {
     VR_CONTROLLER_RIGHT = 1
 };
 
+enum VrPassthroughEffect {
+    VR_PASSTHROUGH_EFFECT_NONE = 0,
+    VR_PASSTHROUGH_EFFECT_DAMAGE,
+    VR_PASSTHROUGH_EFFECT_HEAL,
+    VR_PASSTHROUGH_EFFECT_STAR,
+};
+
 struct VrControllerState {
     bool gripPoseValid;
     float gripPosition[3];
@@ -67,6 +74,9 @@ void vr_queue_physical_punch(uint32_t handIndex);
 bool vr_consume_physical_punch(uint32_t handIndex);
 void vr_notify_star_collected(void);
 uint32_t vr_get_star_collection_serial(void);
+void vr_notify_passthrough_effect(enum VrPassthroughEffect effect);
+enum VrPassthroughEffect vr_get_passthrough_effect(void);
+uint32_t vr_get_passthrough_effect_serial(void);
 void vr_shutdown(void);
 
 void vr_on_graphics_ready(void);
