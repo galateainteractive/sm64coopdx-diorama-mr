@@ -5,10 +5,6 @@
 #include <stdio.h>
 #include <string.h>
 
-#ifdef __ANDROID__
-#include <android/log.h>
-#endif
-
 #include "sm64.h"
 #include "area.h"
 #include "audio/external.h"
@@ -84,58 +80,6 @@ static bool sVrTabletopMovementYawValid = false;
 static s16 sVrTabletopMovementYaw = 0;
 static bool sVrTabletopObserverYawValid = false;
 static s16 sVrTabletopObserverYaw = 0;
-
-#ifdef __ANDROID__
-static void vr_log_tabletop_input_diagnostics(
-    struct MarioState *m,
-    s16 stickYaw,
-    s16 tabletopYaw
-) {
-    if (m == NULL || (gGlobalTimer % 12U) != 0U) {
-        return;
-    }
-
-    float rotation[4] = { 0 };
-    float horizontalProjection = -1.0f;
-    if (vr_get_head_rotation(rotation)) {
-        const float forwardX = -2.0f *
-            (rotation[3] * rotation[1] + rotation[0] * rotation[2]);
-        const float forwardZ = -1.0f + 2.0f *
-            (rotation[0] * rotation[0] + rotation[1] * rotation[1]);
-        horizontalProjection = sqrtf(
-            forwardX * forwardX + forwardZ * forwardZ
-        );
-    }
-
-    __android_log_print(
-        ANDROID_LOG_INFO,
-        "TabletopInput",
-        "t=%u lvl=%d area=%d action=%08X stick=(%.1f,%.1f) "
-        "stickYaw=%d observerYaw=%d observerValid=%d hproj=%.5f "
-        "tableYaw=%d baseYaw=%d finalYaw=%d cameraYaw=%d "
-        "lakituYaw=%d newcamYaw=%d trackingGen=%u",
-        gGlobalTimer,
-        gCurrLevelNum,
-        gCurrAreaIndex,
-        m->action,
-        m->controller->stickX,
-        m->controller->stickY,
-        stickYaw,
-        sVrTabletopObserverYaw,
-        sVrTabletopObserverYawValid,
-        horizontalProjection,
-        tabletopYaw,
-        sVrTabletopMovementYaw,
-        m->intendedYaw,
-        m->area != NULL && m->area->camera != NULL
-            ? m->area->camera->yaw
-            : 0,
-        gLakituState.yaw,
-        gNewCamera.yaw,
-        vr_get_tracking_origin_generation()
-    );
-}
-#endif
 
 static void vr_update_twirl_tornado_effect(struct MarioState *m) {
     if (m == NULL || m->playerIndex != 0) {
@@ -2473,13 +2417,6 @@ void update_mario_joystick_inputs(struct MarioState *m) {
                     stickYaw + sVrTabletopMovementYaw +
                     sVrTabletopObserverYaw - tabletopYaw;
 
-#ifdef __ANDROID__
-                vr_log_tabletop_input_diagnostics(
-                    m,
-                    stickYaw,
-                    tabletopYaw
-                );
-#endif
             }
         }
 
