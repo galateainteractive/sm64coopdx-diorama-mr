@@ -58,10 +58,10 @@ Do not commit the ROM, place it in a release archive, or upload it to GitHub.
 - Quest performance levels, foveation, render scale, and learned shader cache
 - Shared `/sdcard/SM64VR/mods/` and `/sdcard/SM64VR/dynos/packs/` loading, with legacy private directories retained as fallbacks
 
-## Experimental Tabletop MR
+## Experimental Diorama MR
 
 Open **Options > VR Settings > Camera Settings**, then set **Camera Mode**
-to **Tabletop MR Mode**. The current level is rendered as a fixed miniature about
+to **Diorama MR Mode**. The current level is rendered as a fixed miniature about
 1.5 metres ahead and 0.75 metres below the tracked head origin. Mario remains
 fully playable and does not move the viewpoint; walking around, leaning, and
 crouching move only the tracked view around the miniature.
@@ -69,7 +69,9 @@ crouching move only the tracked view around the miniature.
 On Quest hardware, the mode enables an `XR_FB_passthrough` composition layer
 behind the game geometry and makes the game background transparent. If the
 runtime does not expose passthrough, it safely falls back to the virtual
-Tabletop presentation. Its render-only scale and placement constants are centralized in
+Diorama MR presentation. Diorama MR is the default camera mode for new
+configurations; existing saved configurations keep their selected mode. Its render-only
+scale and placement constants are centralized in
 `src/pc/configfile.h` (`VR_TABLETOP_*`).
 
 ## Physical climbing

@@ -187,7 +187,7 @@ static void djui_panel_vr_mode_changed(struct DjuiBase* caller) {
 static void djui_panel_vr_camera_defaults(struct DjuiBase* caller) {
     (void)caller;
 
-    configVrCameraMode = VR_CAMERA_MODE_FIRST_PERSON;
+    configVrCameraMode = VR_CAMERA_MODE_TABLETOP;
     configVrCameraDistance = 100;
     configVrCameraDepth = VR_CAMERA_DEPTH_CENTER;
     configVrPreviousBodyHeight = false;
@@ -418,7 +418,7 @@ static void djui_panel_vr_camera_settings_create(struct DjuiBase* caller) {
         char* cameraModes[VR_CAMERA_MODE_COUNT] = {
             "Third Person Mode",
             "First Person Mode",
-            "Tabletop MR Mode"
+            "Diorama MR Mode"
         };
 
         djui_selectionbox_create(

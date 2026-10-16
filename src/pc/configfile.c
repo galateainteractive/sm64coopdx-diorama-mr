@@ -86,7 +86,7 @@ enum GraphicsBackend configGraphicsBackend        = GAPI_GL;
 unsigned int configFiltering                      = 2; // 0 = Nearest, 1 = Bilinear, 2 = Trilinear
 bool         configShowFPS                        = false;
 bool         configVrAutoStart                    = false;
-unsigned int configVrCameraMode                   = VR_CAMERA_MODE_FIRST_PERSON;
+unsigned int configVrCameraMode                   = VR_CAMERA_MODE_TABLETOP;
 unsigned int configVrCameraDistance               = 100;
 unsigned int configVrCameraHeight                 = VR_CAMERA_HEIGHT_DEFAULT_MARIO;
 unsigned int configVrCameraDepth                  = VR_CAMERA_DEPTH_CENTER;

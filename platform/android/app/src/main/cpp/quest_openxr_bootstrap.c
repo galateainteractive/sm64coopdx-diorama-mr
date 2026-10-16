@@ -1249,7 +1249,7 @@ static void initialize_passthrough(QuestApp *app) {
     XrResult result = app->create_passthrough(
         app->session, &passthrough_info, &app->passthrough);
     if (XR_FAILED(result)) {
-        LOGI("xrCreatePassthroughFB declined Tabletop MR (%d); using VR fallback.",
+        LOGI("xrCreatePassthroughFB declined Diorama MR (%d); using VR fallback.",
              (int)result);
         app->passthrough_supported = false;
         return;
@@ -1263,14 +1263,14 @@ static void initialize_passthrough(QuestApp *app) {
     result = app->create_passthrough_layer(
         app->session, &layer_info, &app->passthrough_layer);
     if (XR_FAILED(result)) {
-        LOGI("xrCreatePassthroughLayerFB declined Tabletop MR (%d); using VR fallback.",
+        LOGI("xrCreatePassthroughLayerFB declined Diorama MR (%d); using VR fallback.",
              (int)result);
         app->destroy_passthrough(app->passthrough);
         app->passthrough = XR_NULL_HANDLE;
         app->passthrough_supported = false;
         return;
     }
-    LOGI("Tabletop MR passthrough layer is ready.");
+    LOGI("Diorama MR passthrough layer is ready.");
     initialize_passthrough_styling(app);
 }
 
@@ -1286,17 +1286,17 @@ static bool update_passthrough_state(QuestApp *app) {
         }
         if (XR_FAILED(result)) {
             app->pause_passthrough(app->passthrough);
-            LOGI("Could not activate Tabletop MR passthrough (%d).", (int)result);
+            LOGI("Could not activate Diorama MR passthrough (%d).", (int)result);
             return false;
         }
         app->passthrough_active = true;
         app->applied_passthrough_effect_weight = -1.0f;
-        LOGI("Tabletop MR passthrough activated.");
+        LOGI("Diorama MR passthrough activated.");
     } else {
         app->pause_passthrough_layer(app->passthrough_layer);
         app->pause_passthrough(app->passthrough);
         app->passthrough_active = false;
-        LOGI("Tabletop MR passthrough paused.");
+        LOGI("Diorama MR passthrough paused.");
     }
     return app->passthrough_active;
 }
