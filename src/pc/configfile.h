@@ -121,9 +121,9 @@ enum VrCameraMode {
 
 // Tabletop is a render-only transform. Gameplay continues to use the original
 // SM64 coordinate system, while 100 rendered units correspond to one metre.
-#define VR_TABLETOP_WORLD_SCALE      0.05f
 #define VR_TABLETOP_MIN_WORLD_SCALE  0.015f
 #define VR_TABLETOP_MAX_WORLD_SCALE  0.20f
+#define VR_TABLETOP_WORLD_SCALE      VR_TABLETOP_MIN_WORLD_SCALE
 #define VR_TABLETOP_FORWARD_METERS   1.50f
 #define VR_TABLETOP_DOWN_METERS      0.75f
 #define VR_TABLETOP_UNITS_PER_METER  100.0f
