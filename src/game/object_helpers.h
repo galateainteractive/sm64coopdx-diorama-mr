@@ -275,6 +275,7 @@ s32 cur_obj_mario_far_away(void);
 s32 is_mario_moving_fast_or_in_air(s32 speedThreshold);
 s32 is_item_in_array(s8 item, s8 *array);
 void cur_obj_enable_rendering_if_mario_in_room(void);
+s32 obj_should_render_in_diorama_room(struct Object *obj);
 s32 cur_obj_set_hitbox_and_die_if_attacked(struct ObjectHitbox *hitbox, s32 deathSound, s32 noLootCoins);
 void obj_explode_and_spawn_coins(f32 sp18, s32 sp1C);
 void obj_set_collision_data(struct Object *obj, const void *segAddr);
