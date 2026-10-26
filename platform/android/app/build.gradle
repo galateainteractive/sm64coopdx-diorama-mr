@@ -2,6 +2,18 @@ plugins {
     id "com.android.application"
 }
 
+import java.util.Properties
+
+def releaseSigningPropertiesPath = System.getenv("SM64_RELEASE_KEYSTORE_PROPERTIES")
+def releaseSigningPropertiesFile = releaseSigningPropertiesPath
+    ? file(releaseSigningPropertiesPath)
+    : rootProject.file("keystore.properties")
+def releaseSigningProperties = new Properties()
+def releaseSigningAvailable = releaseSigningPropertiesFile.exists()
+if (releaseSigningAvailable) {
+    releaseSigningPropertiesFile.withInputStream { releaseSigningProperties.load(it) }
+}
+
 def generatedResourceAssets = layout.buildDirectory.dir("generated/sm64Resources/assets")
 
 tasks.register("syncSm64ResourceAssets", Sync) {
@@ -29,8 +41,8 @@ android {
         applicationId "com.fulldivegames.sm64coopdxvr"
         minSdk 26
         targetSdk 32
-        versionCode 32
-        versionName "0.8.0"
+        versionCode providers.gradleProperty("SM64_VERSION_CODE").get().toInteger()
+        versionName providers.gradleProperty("SM64_VERSION_NAME").get()
 
         ndk {
             abiFilters "arm64-v8a"
@@ -44,12 +56,27 @@ android {
         }
     }
 
+    signingConfigs {
+        if (releaseSigningAvailable) {
+            release {
+                storeFile file(releaseSigningProperties.getProperty("storeFile"))
+                storePassword releaseSigningProperties.getProperty("storePassword")
+                keyAlias releaseSigningProperties.getProperty("keyAlias")
+                keyPassword releaseSigningProperties.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         debug {
             debuggable true
         }
         release {
+            debuggable false
             minifyEnabled false
+            if (releaseSigningAvailable) {
+                signingConfig signingConfigs.release
+            }
         }
     }
 
@@ -71,6 +98,18 @@ android {
 
 tasks.named("preBuild").configure {
     dependsOn("syncSm64ResourceAssets")
+}
+
+tasks.configureEach { task ->
+    if (task.name == "packageRelease") {
+        task.doFirst {
+            if (!releaseSigningAvailable) {
+                throw new GradleException(
+                    "Release signing is not configured. Set SM64_RELEASE_KEYSTORE_PROPERTIES " +
+                    "or create platform/android/keystore.properties.")
+            }
+        }
+    }
 }
 
 dependencies {

@@ -1,8 +1,9 @@
-# SM64 Co-Op DX VR for Quest v0.5.10
+# SM64 Diorama MR for Quest v0.9.0
 
 Player-facing installation, controls, gestures, features, and troubleshooting
 are documented in the repository's main `README.md`. The public release is a
-single APK designed for SideQuest installation.
+signed APK embedded in the public Windows installer. Direct APK installation
+remains available for advanced testing.
 
 The standalone build has been tested on Quest 3 only. Quest 2 has not been
 tested at all, and both the standalone and PC editions remain incompletely

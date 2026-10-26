@@ -337,7 +337,7 @@ bool quest_game_initialize(void) {
     configFramerateMode = RRM_UNLIMITED;
     vr_init();
     vr_set_active(true);
-    gfx_init(&gfx_dummy_wm_api, &gfx_opengl_api, "SM64 Co-Op DX VR");
+    gfx_init(&gfx_dummy_wm_api, &gfx_opengl_api, "SM64 Diorama MR");
 
     dynos_gfx_init();
     enable_queued_dynos_packs();

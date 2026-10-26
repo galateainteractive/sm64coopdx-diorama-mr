@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="textures/segment2/custom_coopdx_logo.rgba32.png" alt="SM64 Co-Op DX VR" width="720">
+  <img src="textures/segment2/custom_coopdx_logo.rgba32.png" alt="SM64 Diorama MR" width="720">
 </p>
 
 <p align="center">
@@ -7,13 +7,13 @@
   &nbsp;|&nbsp; <strong>Quest standalone edition</strong>
 </p>
 
-<h1 align="center">sm64coopdx-VR-Standalone (Physics-based)</h1>
+<h1 align="center">SM64 Diorama MR</h1>
 
 <p align="center">
   Native ARM64/OpenXR VR for Meta Quest. No PC is required after installation.
 </p>
 
-> **Current public release: v0.8.0 — Sonic Shoes Update**
+> **Current public beta: v0.9.0 — Diorama MR Update**
 
 > [!WARNING]
 > This is an active, vibe-coded, yet fairly polished fan project. The standalone edition has been tested on **Meta Quest 3 only**. It has **not been tested on Quest 2 by me**, and neither edition has been tested across every multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur. If you have any performance issues on default settings in the base game, a reset usually fixes things (You should be getting a stable 120 FPS on Quest 3, on most if not all base game maps)
@@ -37,34 +37,38 @@ Open **Server Settings > Voice Chat** to enable or disable voice chat, mute your
 This repository contains the standalone Android/Quest port of [sm64coopdx-VR (Physics-based)](https://github.com/fulldivegames/sm64coopdx-VR-Physics-based), derived from [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx). It runs the game natively on the headset through OpenXR and OpenGL ES while retaining the original project's multiplayer foundation, Lua/mod support where compatible, first- and third-person cameras, tracked hands, and physical VR interactions.
 There are videos on my YouTube channel: https://www.youtube.com/@fulldivegames667 that show off the mod.
 
-## Download and install with SideQuest
+## Download and install
 
-The release is a single APK. Players do not need Git, Android Studio, Gradle, ADB commands, or a PC VR streaming application.
+The recommended release is one Windows installer. Players do not need Git,
+Android Studio, Gradle, SideQuest, ADB commands, or a PC VR streaming
+application. The installer contains the mod APK and ADB, but never a ROM or
+Nintendo game assets.
 
 ### Requirements
 
 - Meta Quest 3 (Quest 2 untested by me, but should run fairly well. There are also performance options!)
 - Developer Mode enabled for the headset
-- [SideQuest](https://sidequestvr.com/setup-howto) installed on a computer
-- A USB data cable or an already configured SideQuest wireless connection
+- A Windows PC and USB data cable
 - Your own legally obtained, unmodified **Super Mario 64 US `.z64` ROM**
 
-### Install the APK
+### Install with the release installer
 
-1. Open this repository's [latest release](https://github.com/fulldivegames/sm64coopdx-VR-Standalone-Physics-based/releases/latest).
-2. Download `SM64-Co-Op-DX-VR-Quest-v0.7.2.apk` under **Assets**.
-3. Connect the Quest to your computer and allow the USB debugging prompt inside the headset.
-4. Open SideQuest and confirm that the headset indicator is connected.
-5. Click **Install APK file from folder** in SideQuest, choose the downloaded APK, and wait for the install-success message.
-6. In the headset, open the App Library, select **Unknown Sources**, and launch **SM64 Co-Op DX VR**.
-7. On first launch, use the Android file picker to select your own unmodified US `.z64` ROM. Placing the ROM in the headset's **Downloads** folder beforehand makes it easy to find.
-8. After the ROM finishes importing, the app will likely close. This is expected; simply reopen **SM64 Co-Op DX VR** from **Unknown Sources**.
-9. Stand comfortably, face forward, and use **Settings > VR > Recalibrate Tracking** if the initial height or direction is wrong.
+1. Open this repository's [latest release](https://github.com/galateainteractive/sm64coopdx-diorama-mr/releases/latest).
+2. Download `SM64-Diorama-MR-v0.9.0-Installer.exe` under **Assets**.
+3. Connect the Quest and accept the USB debugging prompt inside the headset.
+4. Run the installer and select your own unmodified US `.z64` ROM.
+5. Select the authorized Quest and install. The installer validates the ROM,
+   installs the APK, copies the ROM, verifies the transfer, and launches the app.
+6. Accept any mixed-reality or passthrough permission requested in the headset.
+7. If automatic launch is blocked, open **App Library > Unknown Sources > SM64 Diorama MR**.
 
-Updates can be installed over the existing app through SideQuest. Keep the same Android application installed if you want its private ROM/configuration data to remain available. Back up important saves before testing a new release.
+Install updates over the existing app with the newer installer. Do not uninstall
+first if you want the private ROM, save, and configuration data to remain
+available. Back up important saves before testing a new release.
 
 > [!IMPORTANT]
-> Install v0.7.2 directly over an existing installation so the private ROM, save, and settings remain available. Do not uninstall the app first.
+> Install v0.9.0 directly over an existing installation so the private ROM,
+> save, and settings remain available. Do not uninstall the app first.
 
 > [!IMPORTANT]
 > The APK contains no ROM and no Nintendo game assets. Do not upload, bundle, or redistribute a ROM with this project. The app validates the unmodified US ROM before importing it into private application storage.
@@ -77,11 +81,11 @@ The standalone build loads compatible SM64 Co-Op DX mods from this easy-to-acces
 /sdcard/SM64VR/mods/
 ```
 
-1. Install or update to v0.7.2 and launch it once. Android opens the **Allow access to manage all files** page; enable access for **SM64 Co-Op DX VR Standalone**. This permission is used for the shared mod, DynOS, palette, and shader-cache folders.
+1. Install or update to v0.9.0 and launch it once. If Android opens the **Allow access to manage all files** page, enable access for **SM64 Diorama MR**. This permission is used for the shared mod, DynOS, palette, and shader-cache folders.
 2. Close and reopen the game once after granting access. The game creates `/sdcard/SM64VR/mods/` automatically.
 3. Download a mod compatible with SM64 Co-Op DX. The official community browser is [mods.sm64coopdx.com](https://mods.sm64coopdx.com/mods/).
 4. Extract the archive. Copy the **extracted mod folder**, not the `.zip`, into `SM64VR/mods` with SideQuest's file manager. The mod files must be directly inside their own folder rather than inside an extra duplicate folder.
-5. Fully close and reopen **SM64 Co-Op DX VR**. From the main menu, open **Host > Mods**, select the installed mod, and start the game. Use **Refresh** if the mod was copied while the app was open.
+5. Fully close and reopen **SM64 Diorama MR**. From the main menu, open **Host > Mods**, select the installed mod, and start the game. Use **Refresh** if the mod was copied while the app was open.
 
 You can also create the folder and transfer an extracted mod with ADB:
 
@@ -96,7 +100,7 @@ The previous private `Android/data/com.fulldivegames.sm64coopdxvr/files/mods/` l
 
 ### Install DynOS packs
 
-Launch the game once after installing v0.7.2. The game automatically creates:
+Launch the game once after installing v0.9.0. The game automatically creates:
 
 ```text
 /sdcard/SM64VR/dynos/packs/
@@ -118,9 +122,9 @@ Custom palette files can be copied to:
 
 The persistent learned shader cache is stored in `/sdcard/SM64VR/shader-cache/`. It is managed by the game; do not install mods there.
 
-### Mod compatibility in v0.7.2
+### Mod compatibility
 
-v0.7.2 includes expanded mod discovery, startup, menu, rendering, character-model, DynOS, and palette path compatibility. Character Selector was specifically tested with multiple character packs, including its in-game selection overlay. Multiple extracted DynOS packs are discovered from `dynos/packs`, and shared standalone paths now keep mods, packs, palettes, and shader-cache data accessible outside Android's restricted private-data folder.
+The standalone build includes expanded mod discovery, startup, menu, rendering, character-model, DynOS, and palette path compatibility. Character Selector was specifically tested with multiple character packs, including its in-game selection overlay. Multiple extracted DynOS packs are discovered from `dynos/packs`, and shared standalone paths now keep mods, packs, palettes, and shader-cache data accessible outside Android's restricted private-data folder.
 
 Compatibility is not universal. Mods that depend on desktop-native binaries, desktop-only graphics APIs, unsupported keyboard windows, extreme memory use, or assumptions about the original flat camera may still fail. Character packs can also define their own selection rules rather than appearing in the built-in Mario/Luigi/Toad/Wario/Waluigi list. Install one mod at a time when diagnosing a failure and report the exact mod name/version with a crash log when possible.
 
@@ -271,7 +275,23 @@ Painting entries use a short white comfort fade. The optional True First Person 
 
 When **WiddlePets** is enabled, Server Settings adds a **Pets** button that opens the mod's own `/wpets` pet-selection menu. Pet choice, spawning, and following behavior remain controlled by WiddlePets itself.
 
-## v0.8.0 — Sonic Shoes Update
+## v0.9.0 — Diorama MR Update
+
+- Added Diorama MR as the default presentation for new configurations, with
+  room-scale head tracking independent from Mario and Meta Quest passthrough
+- Added one- and two-hand miniature manipulation: drag, character-centered
+  scale, and character-centered yaw rotation
+- Added stable headset-relative Mario movement across initial entry, death,
+  level changes, doors, warps, and Diorama rotation
+- Added spatial Mario audio, contextual passthrough color effects, tracked
+  gloves, and improved VR-facing behavior for billboarded objects
+- Added conservative hidden-room object culling for cleaner castle and
+  multi-room Diorama presentation
+- Added the ROM-validating Galatea Windows installer and release-signing flow
+
+## Previous Release Notes
+
+### v0.8.0 — Sonic Shoes Update
 
 - Added **Sonic Shoes** as a timed spawnable power-up with matching pickup gravity, Spawn Menu access, balanced box-pool integration, Green Hill Zone music, and a close-tracking sparkle trail
 - Added a 0–300 Sonic speed slider with a 3× baseline at zero; the multiplier consistently covers running, acceleration, turning, slopes, dives, and dive recovery
@@ -279,8 +299,6 @@ When **WiddlePets** is enabled, Server Settings adds a **Pets** button that open
 - Added the compatible **WiddlePets** selection menu and its in-game location reminder without changing the mod's pet behavior
 - Added reliable hammer knockback against Bully-type enemies and 1.5× knockback for special-move explosions
 - Kept the performance pass conservative: reduced avoidable loading/runtime work without lowering normal visual quality or changing established gameplay behavior
-
-## Previous Release Notes
 
 ### v0.7.9 — Voice Chat and Filters Update
 

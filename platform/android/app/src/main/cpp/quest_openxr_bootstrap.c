@@ -633,7 +633,7 @@ static bool create_openxr_instance(QuestApp *app) {
         .type = XR_TYPE_INSTANCE_CREATE_INFO,
         .next = &android_info,
         .applicationInfo = {
-            .applicationName = "SM64 Co-Op DX VR",
+            .applicationName = "SM64 Diorama MR",
             .applicationVersion = 1,
             .engineName = "SM64 Co-Op DX",
             .engineVersion = 1,
