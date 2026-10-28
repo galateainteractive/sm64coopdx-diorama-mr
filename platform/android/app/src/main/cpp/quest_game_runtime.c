@@ -417,7 +417,9 @@ enum QuestPassthroughTheme quest_game_passthrough_theme(void) {
         case LEVEL_TTM:
         case LEVEL_CASTLE_GROUNDS:
         case LEVEL_CASTLE_COURTYARD:
-            return QUEST_PASSTHROUGH_THEME_GRASS;
+            // Keep ordinary outdoor areas natural. Green remains reserved for
+            // the short heal/1-Up effect instead of tinting the first view.
+            return QUEST_PASSTHROUGH_THEME_NEUTRAL;
         default:
             return QUEST_PASSTHROUGH_THEME_NEUTRAL;
     }
