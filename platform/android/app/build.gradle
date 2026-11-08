@@ -33,12 +33,12 @@ tasks.register("syncSm64ResourceAssets", Sync) {
 }
 
 android {
-    namespace "com.fulldivegames.sm64coopdxvr"
+    namespace "com.galateainteractive.sm64dioramamr"
     compileSdk 35
     ndkVersion "27.0.12077973"
 
     defaultConfig {
-        applicationId "com.fulldivegames.sm64coopdxvr"
+        applicationId "com.galateainteractive.sm64dioramamr"
         minSdk 26
         targetSdk 32
         versionCode providers.gradleProperty("SM64_VERSION_CODE").get().toInteger()

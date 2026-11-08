@@ -36,13 +36,13 @@ are rejected.
 Developers may instead copy the ROM to:
 
 ```text
-/sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files/baserom.us.z64
+/sdcard/Android/data/com.galateainteractive.sm64dioramamr/files/baserom.us.z64
 ```
 
 For example, with ADB installed and the Quest connected:
 
 ```powershell
-adb push "C:\path\to\your\baserom.us.z64" "/sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files/baserom.us.z64"
+adb push "C:\path\to\your\baserom.us.z64" "/sdcard/Android/data/com.galateainteractive.sm64dioramamr/files/baserom.us.z64"
 ```
 
 Do not commit the ROM, place it in a release archive, or upload it to GitHub.

@@ -96,7 +96,7 @@ adb shell mkdir -p /sdcard/SM64VR/mods
 adb push "C:\path\to\ExtractedModFolder" /sdcard/SM64VR/mods/
 ```
 
-The previous private `Android/data/com.fulldivegames.sm64coopdxvr/files/mods/` location remains a compatibility fallback. If the special file-access permission is declined, mods already stored there continue to load, but `/sdcard/SM64VR/mods/` is unavailable.
+The private `Android/data/com.galateainteractive.sm64dioramamr/files/mods/` location remains a compatibility fallback. If the special file-access permission is declined, mods already stored there continue to load, but `/sdcard/SM64VR/mods/` is unavailable. The Windows installer can migrate data from the earlier `com.fulldivegames.sm64coopdxvr` package during the identity transition.
 
 ### Install DynOS packs
 

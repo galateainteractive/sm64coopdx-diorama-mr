@@ -27,6 +27,17 @@ The standalone APK is also supplied for advanced manual installation:
 SM64-Diorama-MR-v0.9.0.apk
 ```
 
+The final Galatea application identity is
+`com.galateainteractive.sm64dioramamr`. Its private Quest data directory is:
+
+```text
+/sdcard/Android/data/com.galateainteractive.sm64dioramamr/files
+```
+
+The installer safely migrates saves, configuration and ROM data from the
+earlier pre-release `com.fulldivegames.sm64coopdxvr` directory when the new
+directory is still empty. The original directory is retained as a backup.
+
 ## Important update note
 
 The v0.9.0 APK uses the new permanent Galatea release-signing certificate.
@@ -45,6 +56,7 @@ Future releases signed with the same protected key can update v0.9.0 in place.
 - Headset-relative Mario controls stabilized across transitions and respawns.
 - Spatial Mario audio and contextual passthrough color effects.
 - Improved billboard rendering and conservative hidden-room object culling.
+- Permanent Galatea Android package identity with resumable legacy-data migration.
 
 ## Integrity
 
