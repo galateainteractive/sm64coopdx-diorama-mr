@@ -37,6 +37,8 @@ The final Galatea application identity is
 The installer safely migrates saves, configuration and ROM data from the
 earlier pre-release `com.fulldivegames.sm64coopdxvr` directory when the new
 directory is still empty. The original directory is retained as a backup.
+Disposable private shader caches are not copied; the new app recreates them.
+Migrated files receive Quest-compatible permissions before the first launch.
 
 ## Important update note
 
@@ -57,6 +59,8 @@ Future releases signed with the same protected key can update v0.9.0 in place.
 - Spatial Mario audio and contextual passthrough color effects.
 - Improved billboard rendering and conservative hidden-room object culling.
 - Permanent Galatea Android package identity with resumable legacy-data migration.
+- Cache-aware package migration with verified ROM preservation and corrected
+  Quest scoped-storage permissions.
 
 ## Integrity
 
