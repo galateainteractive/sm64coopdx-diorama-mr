@@ -5,7 +5,7 @@
 
 // Public release version for the VR fork. Keep this separate from
 // SM64COOPDX_VERSION because the latter is part of multiplayer compatibility.
-#define SM64COOPDX_VR_VERSION "v0.8.0"
+#define SM64COOPDX_VR_VERSION "v0.9.0"
 
 // internal version
 #define VERSION_TEXT "v"
@@ -32,7 +32,7 @@
 #define WINDOW_NAME "Super Mario 64 Coop Deluxe (INTL)"
 #else
 #define GAME_NAME "sm64coopdx"
-#define WINDOW_NAME "SM64 Co-Op DX VR"
+#define WINDOW_NAME "SM64 Diorama MR"
 #endif
 
 #define MAX_VERSION_LENGTH 128

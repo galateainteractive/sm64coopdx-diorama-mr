@@ -34,7 +34,7 @@
     <application
         android:allowBackup="false"
         android:hasCode="true"
-        android:label="SM64 Co-Op DX VR Standalone"
+        android:label="SM64 Diorama MR"
         android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen">
 
         <meta-data
@@ -42,7 +42,7 @@
             android:value="all" />
 
         <activity
-            android:name="com.fulldivegames.sm64coopdxvr.QuestNativeActivity"
+            android:name="com.galateainteractive.sm64dioramamr.QuestNativeActivity"
             android:configChanges="screenSize|screenLayout|orientation|keyboardHidden|keyboard|navigation|uiMode"
             android:exported="true"
             android:launchMode="singleTask"

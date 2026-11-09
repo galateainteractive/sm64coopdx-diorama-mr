@@ -76,8 +76,6 @@ static u8 sVrForwardSideFlipPrimeTicks = 0;
 static u8 sVrLateralSideFlipPrimeTicks = 0;
 static u8 sVrLateralSideFlipRequestTicks = 0;
 static struct Object *sVrTwirlTornado = NULL;
-static bool sVrTabletopMovementYawValid = false;
-static s16 sVrTabletopMovementYaw = 0;
 static bool sVrTabletopObserverYawValid = false;
 static s16 sVrTabletopObserverYaw = 0;
 
@@ -194,23 +192,23 @@ static bool vr_get_tabletop_observer_yaw(s16* yaw) {
     }
 
     float headPosition[3] = { 0 };
-    float tabletopCenter[3] = { 0 };
+    float marioPosition[3] = { 0 };
     if (!vr_get_head_translation(headPosition) ||
-        !vr_get_tabletop_center_tracking_position(tabletopCenter)) {
+        !vr_get_tabletop_mario_tracking_position(marioPosition)) {
         return false;
     }
 
-    const float towardCenterX = tabletopCenter[0] - headPosition[0];
-    const float towardCenterZ = tabletopCenter[2] - headPosition[2];
+    const float towardMarioX = marioPosition[0] - headPosition[0];
+    const float towardMarioZ = marioPosition[2] - headPosition[2];
     const float horizontalDistanceSquared =
-        towardCenterX * towardCenterX + towardCenterZ * towardCenterZ;
+        towardMarioX * towardMarioX + towardMarioZ * towardMarioZ;
     if (horizontalDistanceSquared < 0.0225f) {
-        // Within 15 cm of the pivot there is no meaningful side of the table.
+        // Within 15 cm of Mario there is no meaningful horizontal direction.
         // Retain the last good observer basis rather than letting noise flip it.
         return false;
     }
 
-    *yaw = (s16)-atan2s(-towardCenterZ, towardCenterX);
+    *yaw = (s16)-atan2s(-towardMarioZ, towardMarioX);
     return true;
 }
 
@@ -2352,9 +2350,6 @@ void update_mario_joystick_inputs(struct MarioState *m) {
         configVrCameraMode == VR_CAMERA_MODE_TABLETOP;
 
     if (!tabletopMovement) {
-        // A fresh Tabletop entry captures the direction that currently feels
-        // natural, then keeps it stable until the player leaves the mode.
-        sVrTabletopMovementYawValid = false;
         sVrTabletopObserverYawValid = false;
     }
 
@@ -2386,37 +2381,21 @@ void update_mario_joystick_inputs(struct MarioState *m) {
         if (tabletopMovement) {
             s16 sampledObserverYaw = 0;
             if (vr_get_tabletop_observer_yaw(&sampledObserverYaw)) {
-                // Use which side of the miniature the player occupies, not
-                // the direction their head happens to point. Looking aside
-                // stays stable, while physically walking around the table
-                // rotates the controls naturally. Brief pose gaps preserve
-                // the last valid room-space observer basis.
+                // Use the horizontal headset-to-Mario direction directly.
+                // This remains deterministic while the initial placement,
+                // zoom, translation, or pivot changes the rendered tabletop.
+                // Brief tracking gaps preserve the last valid basis.
                 sVrTabletopObserverYaw = sampledObserverYaw;
                 sVrTabletopObserverYawValid = true;
             }
 
-            if (!sVrTabletopMovementYawValid &&
-                sVrTabletopObserverYawValid) {
-                // Rendering cancels the Mario-following game camera in
-                // Tabletop, so its later automatic turns must not silently
-                // rotate locomotion. Preserve only the initial camera-to-world
-                // basis, excluding the current tracked head yaw, then reuse it
-                // across doors, warps, and camera triggers.
-                sVrTabletopMovementYaw =
-                    (s16)(m->intendedYaw - stickYaw -
-                          sVrTabletopObserverYaw);
-                sVrTabletopMovementYawValid = true;
-            }
-
-            if (sVrTabletopMovementYawValid) {
-                // Sample render yaw once for this gameplay tick. Observer
-                // position supplies the room-relative view, while render-only
-                // model rotation is removed from the gameplay direction.
+            if (sVrTabletopObserverYawValid) {
+                // Convert the room-relative stick direction straight back to
+                // gameplay space. No vanilla camera yaw is sampled or cached,
+                // so startup camera settling cannot rotate the controls.
                 const s16 tabletopYaw = vr_get_tabletop_world_yaw();
                 m->intendedYaw =
-                    stickYaw + sVrTabletopMovementYaw +
-                    sVrTabletopObserverYaw - tabletopYaw;
-
+                    stickYaw + sVrTabletopObserverYaw - tabletopYaw;
             }
         }
 

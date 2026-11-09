@@ -788,11 +788,16 @@ static s8 sVrTabletopManipulationHand = -1;
 static Vec3f sVrTabletopPreviousHandPosition = { 0 };
 static Vec3f sVrTabletopGestureStartMidpoint = { 0 };
 static Vec3f sVrTabletopGestureStartCenter = { 0 };
+static Vec3f sVrTabletopGestureStartPivot = { 0 };
+static Vec3f sVrTabletopGestureStartMarioPosition = { 0 };
 static f32 sVrTabletopGestureStartDistance = 0.0f;
 static f32 sVrTabletopGestureStartAngle = 0.0f;
 static f32 sVrTabletopGestureStartScale = VR_TABLETOP_WORLD_SCALE;
 static s16 sVrTabletopGestureStartYaw = 0;
 static bool sVrTabletopGestureStartAngleValid = false;
+static bool sVrTabletopGestureStartPivotValid = false;
+static bool sVrTabletopInitialPlacementPending = false;
+static u8 sVrTabletopInitialPlacementStableFrames = 0;
 static void vr_build_tabletop_transform(Mat4 transform);
 static void vr_build_game_camera_matrix(
     Mat4 matrix, Vec3f position, Vec3f focus, s16 roll
@@ -1029,6 +1034,10 @@ void vr_handle_camera_mode_change(void) {
     sVrTabletopManipulationHand = -1;
     sVrTabletopGestureStartDistance = 0.0f;
     sVrTabletopGestureStartAngleValid = false;
+    sVrTabletopGestureStartPivotValid = false;
+    sVrTabletopInitialPlacementPending =
+        cameraMode == VR_CAMERA_MODE_TABLETOP;
+    sVrTabletopInitialPlacementStableFrames = 0;
     vr_reset_first_person_calibration();
 
     // Do not carry first-person smooth-turn momentum or a camera-space
@@ -1066,6 +1075,13 @@ static void vr_refresh_tracking_origin(void) {
     // reference-space recenter. The following valid frame establishes both
     // endpoints from the runtime's new tracking origin.
     vr_reset_first_person_calibration();
+    if (configVrCameraMode == VR_CAMERA_MODE_TABLETOP) {
+        // A runtime recenter changes the room-space origin. Recreate only the
+        // initial presentation placement; level/area transitions deliberately
+        // keep the user's current scale, yaw, and translation.
+        sVrTabletopInitialPlacementPending = true;
+        sVrTabletopInitialPlacementStableFrames = 0;
+    }
 }
 
 static void vr_update_first_person_action_turn(void) {
@@ -2975,6 +2991,10 @@ s16 vr_get_tabletop_world_yaw(void) {
     return sVrTabletopWorldYaw;
 }
 
+bool vr_is_tabletop_initial_placement_pending(void) {
+    return sVrTabletopInitialPlacementPending;
+}
+
 bool vr_get_tabletop_center_tracking_position(float outPosition[3]) {
     if (outPosition == NULL || configVrCameraMode != VR_CAMERA_MODE_TABLETOP ||
         !sVrTabletopAnchorValid) {
@@ -2990,9 +3010,13 @@ bool vr_get_tabletop_center_tracking_position(float outPosition[3]) {
     return true;
 }
 
-bool vr_get_tabletop_mario_tracking_position(float outPosition[3]) {
-    if (outPosition == NULL || configVrCameraMode != VR_CAMERA_MODE_TABLETOP ||
-        !sVrTabletopAnchorValid || gMarioStates[0].marioObj == NULL) {
+static bool vr_tabletop_world_to_tracking_position(
+    const Vec3f worldPosition,
+    Vec3f outPosition
+) {
+    if (worldPosition == NULL || outPosition == NULL ||
+        configVrCameraMode != VR_CAMERA_MODE_TABLETOP ||
+        !sVrTabletopAnchorValid) {
         return false;
     }
 
@@ -3001,12 +3025,25 @@ bool vr_get_tabletop_mario_tracking_position(float outPosition[3]) {
     for (u32 worldAxis = 0; worldAxis < 3; worldAxis++) {
         f32 transformed = tabletopTransform[3][worldAxis];
         for (u32 modelAxis = 0; modelAxis < 3; modelAxis++) {
-            transformed += gMarioStates[0].pos[modelAxis] *
+            transformed += worldPosition[modelAxis] *
                 tabletopTransform[modelAxis][worldAxis];
         }
-        outPosition[worldAxis] = transformed / VR_TABLETOP_UNITS_PER_METER;
+        outPosition[worldAxis] =
+            transformed / VR_TABLETOP_UNITS_PER_METER;
     }
     return true;
+}
+
+bool vr_get_tabletop_mario_tracking_position(float outPosition[3]) {
+    if (outPosition == NULL || configVrCameraMode != VR_CAMERA_MODE_TABLETOP ||
+        !sVrTabletopAnchorValid || gMarioStates[0].marioObj == NULL) {
+        return false;
+    }
+
+    return vr_tabletop_world_to_tracking_position(
+        gMarioStates[0].pos,
+        outPosition
+    );
 }
 
 static void vr_apply_tabletop_hand_space_correction(Mat4 matrix) {
@@ -3726,6 +3763,63 @@ static bool vr_get_ui_plane_ndc(
     return *halfWidth > 0.000001f && *halfHeight > 0.000001f;
 }
 
+#define VR_TABLETOP_INITIAL_PLACEMENT_SETTLE_FRAMES 8U
+
+static void vr_update_tabletop_initial_placement(void) {
+    if (!sVrTabletopInitialPlacementPending ||
+        !sVrTabletopAnchorValid ||
+        gMarioStates[0].marioObj == NULL) {
+        return;
+    }
+
+    float headPosition[3] = { 0 };
+    float headRotation[4] = { 0 };
+    Vec3f marioPosition;
+    if (!vr_get_head_translation(headPosition) ||
+        !vr_get_head_rotation(headRotation) ||
+        !vr_get_tabletop_mario_tracking_position(marioPosition)) {
+        sVrTabletopInitialPlacementStableFrames = 0;
+        return;
+    }
+
+    // Give the entry recenter and the newly loaded area's collision bounds a
+    // handful of valid frames to settle before committing the room placement.
+    if (sVrTabletopInitialPlacementStableFrames <
+        VR_TABLETOP_INITIAL_PLACEMENT_SETTLE_FRAMES) {
+        sVrTabletopInitialPlacementStableFrames++;
+        return;
+    }
+
+    Vec3f headForward = { 0.0f, 0.0f, -1.0f };
+    vr_rotate_pose_vector(headRotation, headForward, headForward);
+    const f32 horizontalLength = sqrtf(
+        headForward[0] * headForward[0] +
+        headForward[2] * headForward[2]
+    );
+    if (horizontalLength < 0.0001f) {
+        return;
+    }
+
+    headForward[0] /= horizontalLength;
+    headForward[2] /= horizontalLength;
+    const Vec3f targetPosition = {
+        headPosition[0] +
+            headForward[0] * VR_TABLETOP_FORWARD_METERS,
+        headPosition[1] - VR_TABLETOP_DOWN_METERS,
+        headPosition[2] +
+            headForward[2] * VR_TABLETOP_FORWARD_METERS
+    };
+    for (u32 axis = 0; axis < 3; axis++) {
+        // Moving the transform's room-space center moves Mario by exactly the
+        // same delta, without touching any gameplay coordinate.
+        sVrTabletopUserOffset[axis] +=
+            targetPosition[axis] - marioPosition[axis];
+    }
+
+    sVrTabletopInitialPlacementPending = false;
+    sVrTabletopInitialPlacementStableFrames = 0;
+}
+
 static void vr_update_tabletop_manipulation(void) {
     struct VrControllerState states[VR_CONTROLLER_COUNT] = { 0 };
     bool poseValid[VR_CONTROLLER_COUNT] = { false };
@@ -3794,6 +3888,16 @@ static void vr_update_tabletop_manipulation(void) {
             sVrTabletopGestureStartAngle = handAngle;
             sVrTabletopGestureStartAngleValid =
                 horizontalDistance >= 0.10f;
+            vec3f_copy(
+                sVrTabletopGestureStartMarioPosition,
+                gMarioStates[0].pos
+            );
+            sVrTabletopGestureStartPivotValid =
+                gMarioStates[0].marioObj != NULL &&
+                vr_tabletop_world_to_tracking_position(
+                    sVrTabletopGestureStartMarioPosition,
+                    sVrTabletopGestureStartPivot
+                );
         } else {
             f32 scaleRatio = 1.0f;
             if (distance > 0.05f &&
@@ -3834,21 +3938,40 @@ static void vr_update_tabletop_manipulation(void) {
                     (s16)(handAngleDelta * 32768.0f / pi);
             }
 
-            // Scaling and yaw now happen around the static geometry center.
-            // Keep that center fixed in room space; only an intentional
-            // two-hand translation moves the complete tabletop.
+            // First apply the complete gesture around the map center. Then
+            // compensate its room translation so the Mario position captured
+            // at gesture start remains under the moving hand midpoint. Using
+            // the frozen model position avoids chasing a running Mario and
+            // makes zoom and yaw share one stable, predictable pivot.
             Vec3f newCenter;
+            Vec3f midpointDelta;
             vec3f_copy(newCenter, sVrTabletopGestureStartCenter);
             for (u32 axis = 0; axis < 3; axis++) {
-                newCenter[axis] +=
+                midpointDelta[axis] =
                     midpoint[axis] -
                     sVrTabletopGestureStartMidpoint[axis];
+                newCenter[axis] += midpointDelta[axis];
             }
             sVrTabletopUserOffset[0] = newCenter[0];
             sVrTabletopUserOffset[1] =
                 newCenter[1] + VR_TABLETOP_DOWN_METERS;
             sVrTabletopUserOffset[2] =
                 newCenter[2] + VR_TABLETOP_FORWARD_METERS;
+
+            Vec3f transformedPivot;
+            if (sVrTabletopGestureStartPivotValid &&
+                vr_tabletop_world_to_tracking_position(
+                    sVrTabletopGestureStartMarioPosition,
+                    transformedPivot
+                )) {
+                for (u32 axis = 0; axis < 3; axis++) {
+                    const f32 desiredPivot =
+                        sVrTabletopGestureStartPivot[axis] +
+                        midpointDelta[axis];
+                    sVrTabletopUserOffset[axis] +=
+                        desiredPivot - transformedPivot[axis];
+                }
+            }
         }
 
         sVrTabletopManipulationHands = 2;
@@ -3875,6 +3998,7 @@ static void vr_update_tabletop_manipulation(void) {
         sVrTabletopManipulationHand = heldHand;
         sVrTabletopGestureStartDistance = 0.0f;
         sVrTabletopGestureStartAngleValid = false;
+        sVrTabletopGestureStartPivotValid = false;
         return;
     }
 
@@ -3882,6 +4006,7 @@ static void vr_update_tabletop_manipulation(void) {
     sVrTabletopManipulationHand = -1;
     sVrTabletopGestureStartDistance = 0.0f;
     sVrTabletopGestureStartAngleValid = false;
+    sVrTabletopGestureStartPivotValid = false;
 }
 
 static bool vr_build_head_view_matrix(
@@ -3966,9 +4091,6 @@ static bool vr_build_head_view_matrix(
     if (!menuScene &&
         configVrCameraMode == VR_CAMERA_MODE_TABLETOP &&
         sCameraNode != NULL) {
-        if (eyeIndex == 0) {
-            vr_update_tabletop_manipulation();
-        }
         if (!sVrTabletopAnchorValid ||
             sVrTabletopAnchorLevel != gCurrLevelNum ||
             sVrTabletopAnchorArea != gCurrAreaIndex) {
@@ -3988,6 +4110,10 @@ static bool vr_build_head_view_matrix(
             sVrTabletopAnchorLevel = gCurrLevelNum;
             sVrTabletopAnchorArea = gCurrAreaIndex;
             sVrTabletopAnchorValid = true;
+        }
+        if (eyeIndex == 0) {
+            vr_update_tabletop_initial_placement();
+            vr_update_tabletop_manipulation();
         }
 
         Vec3f cameraPosition;
@@ -4442,6 +4568,9 @@ static void reset_mtx(void) {
 
 void patch_mtx_before(void) {
     vr_handle_camera_mode_change();
+    // Tabletop also needs to observe OpenXR reference-space generations so a
+    // runtime recenter can place the miniature in front of the new head pose.
+    vr_refresh_tracking_origin();
     // A newly loaded area does not have a usable HMD/camera basis while its
     // warp is being initialized. Apply the requested destination direction
     // here, on the first rendered frame where tracking is valid, instead of
@@ -7749,6 +7878,10 @@ static struct MarioBodyState *get_mario_body_state_from_mario_object(struct Obje
  * Process an object node.
  */
 static void geo_process_object(struct Object *node) {
+    if (!obj_should_render_in_diorama_room(node)) {
+        return;
+    }
+
     struct Object* lastProcessingObject = gCurGraphNodeProcessingObject;
     struct MarioState* lastMarioState = gCurGraphNodeMarioState;
     gCurGraphNodeProcessingObject = node;

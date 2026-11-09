@@ -31,13 +31,13 @@ float mouse_scroll_x, mouse_scroll_y;
 float gRenderingDelta;
 uint8_t gRenderingInterpolated;
 static char sQuestUserPath[4096] =
-    "/sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files";
+    "/sdcard/Android/data/com.galateainteractive.sm64dioramamr/files";
 static const char sQuestSharedModPath[] = "/sdcard/SM64VR/mods";
 static const char sQuestSharedDynosPackPath[] = "/sdcard/SM64VR/dynos/packs";
 static const char sQuestSharedPalettePath[] = "/sdcard/SM64VR/palettes";
 static const char sQuestSharedShaderCachePath[] = "/sdcard/SM64VR/shader-cache";
 char gRomFilename[4096] =
-    "/sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files/baserom.us.z64";
+    "/sdcard/Android/data/com.galateainteractive.sm64dioramamr/files/baserom.us.z64";
 bool gGameInited;
 bool gGfxInited;
 bool gUpdateMessage;
@@ -190,7 +190,7 @@ const char *sys_file_extension(const char *path) {
     const char *dot = strrchr(path, '.');
     const char *slash = strrchr(path, '/');
     // Dots in an Android package directory (for example
-    // com.fulldivegames.sm64coopdxvr/files) are not file extensions. The old
+    // com.galateainteractive.sm64dioramamr/files) are not file extensions. The old
     // implementation made fs_mount() reject the entire user-data directory,
     // so EEPROM/config writes succeeded by absolute path but subsequent reads
     // could never find them through the virtual filesystem.

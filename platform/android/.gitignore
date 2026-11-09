@@ -6,3 +6,7 @@ local.properties
 captures/
 .reference-sm64ex-android/
 .debug/
+keystore.properties
+release-artifacts/
+*.jks
+*.p12

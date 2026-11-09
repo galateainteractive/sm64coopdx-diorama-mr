@@ -337,7 +337,7 @@ bool quest_game_initialize(void) {
     configFramerateMode = RRM_UNLIMITED;
     vr_init();
     vr_set_active(true);
-    gfx_init(&gfx_dummy_wm_api, &gfx_opengl_api, "SM64 Co-Op DX VR");
+    gfx_init(&gfx_dummy_wm_api, &gfx_opengl_api, "SM64 Diorama MR");
 
     dynos_gfx_init();
     enable_queued_dynos_packs();
@@ -417,7 +417,9 @@ enum QuestPassthroughTheme quest_game_passthrough_theme(void) {
         case LEVEL_TTM:
         case LEVEL_CASTLE_GROUNDS:
         case LEVEL_CASTLE_COURTYARD:
-            return QUEST_PASSTHROUGH_THEME_GRASS;
+            // Keep ordinary outdoor areas natural. Green remains reserved for
+            // the short heal/1-Up effect instead of tinting the first view.
+            return QUEST_PASSTHROUGH_THEME_NEUTRAL;
         default:
             return QUEST_PASSTHROUGH_THEME_NEUTRAL;
     }

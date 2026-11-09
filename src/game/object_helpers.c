@@ -41,6 +41,8 @@ struct Object* gContinueDialogFunctionObject = NULL;
 s8 D_8032F0A0[] = { -8, 8, -4, 4 };
 s16 D_8032F0A4[] = { 0x01, 0x02, 0x04, 0x08, 0x10, 0x20, 0x40, 0x80 };
 static s8 sLevelsWithRooms[] = { LEVEL_BBH, LEVEL_CASTLE, LEVEL_HMC, -1 };
+static u32 sDioramaVisualRoomCacheFrame[OBJECT_POOL_CAPACITY];
+static s16 sDioramaVisualRoomCache[OBJECT_POOL_CAPACITY];
 
 #define o gCurrentObject
 
@@ -3146,6 +3148,106 @@ void cur_obj_enable_rendering_if_mario_in_room(void) {
         o->activeFlags |= ACTIVE_FLAG_IN_DIFFERENT_ROOM;
         gNumRoomedObjectsNotInMarioRoom++;
     }
+}
+
+/**
+ * Returns whether an otherwise unroomed object should be drawn by Diorama MR.
+ *
+ * Roomed levels switch their geometry by Mario's room, but several ordinary
+ * objects never initialize oRoom. That is normally hidden by the flat-screen
+ * camera and distance culling; in a miniature with passthrough, those objects
+ * can visibly float where an unloaded room should be. Keep this render-only:
+ * infer an effective room from the floor without changing oRoom or any active
+ * flags used by gameplay.
+ */
+s32 obj_should_render_in_diorama_room(struct Object *obj) {
+    if (obj == NULL || !vr_is_active() || configVrCameraMode != VR_CAMERA_MODE_TABLETOP) {
+        return TRUE;
+    }
+    if (!is_item_in_array(gCurrLevelNum, sLevelsWithRooms) || obj->oRoom != -1) {
+        return TRUE;
+    }
+
+    // These objects have visibility rules of their own or must remain tied to
+    // the player/controller rather than to the floor beneath them.
+    for (s32 i = 0; i < MAX_PLAYERS; i++) {
+        if (obj == gMarioStates[i].marioObj) {
+            return TRUE;
+        }
+    }
+    if (obj->oHeldState != HELD_FREE ||
+        (obj->oInteractType & (INTERACT_DOOR | INTERACT_WARP_DOOR)) != 0) {
+        return TRUE;
+    }
+
+    const uintptr_t objectAddress = (uintptr_t) obj;
+    const uintptr_t poolStart = (uintptr_t) &gObjectPool[0];
+    const uintptr_t poolEnd = (uintptr_t) &gObjectPool[OBJECT_POOL_CAPACITY];
+    s32 poolIndex = -1;
+    if (objectAddress >= poolStart && objectAddress < poolEnd) {
+        poolIndex = (s32) ((objectAddress - poolStart) / sizeof(struct Object));
+    }
+
+    const u32 cacheFrame = gGlobalTimer + 1;
+    s16 room = 0;
+    if (poolIndex >= 0 && sDioramaVisualRoomCacheFrame[poolIndex] == cacheFrame) {
+        room = sDioramaVisualRoomCache[poolIndex];
+    } else {
+        struct Surface *floor = NULL;
+        find_floor(obj->oPosX, obj->oPosY, obj->oPosZ, &floor);
+
+        // Match bhv_init_room's fallback for objects standing on a platform
+        // whose own collision surface has room 0.
+        if (floor != NULL && floor->room == 0) {
+            find_floor(obj->oPosX, obj->oPosY - 100.0f, obj->oPosZ, &floor);
+        }
+
+        room = (floor != NULL) ? floor->room : 0;
+        if (room == 0 && obj->parentObj != NULL && obj->parentObj != obj) {
+            if (obj->parentObj->oRoom > 0) {
+                room = obj->parentObj->oRoom;
+            } else {
+                find_floor(
+                    obj->parentObj->oPosX,
+                    obj->parentObj->oPosY,
+                    obj->parentObj->oPosZ,
+                    &floor
+                );
+                room = (floor != NULL) ? floor->room : 0;
+            }
+        }
+
+        if (poolIndex >= 0) {
+            sDioramaVisualRoomCache[poolIndex] = room;
+            sDioramaVisualRoomCacheFrame[poolIndex] = cacheFrame;
+        }
+    }
+
+    // Unknown is deliberately visible. False positives are more damaging than
+    // leaving one unusual object visible for a later targeted exception.
+    if (room <= 0) {
+        return TRUE;
+    }
+
+    for (s32 i = 0; i < MAX_PLAYERS; i++) {
+        if (!is_player_active(&gMarioStates[i])) {
+            continue;
+        }
+        const s16 currentRoom = gMarioStates[i].currentRoom;
+        if (currentRoom == 0 || currentRoom == room ||
+            gDoorAdjacentRooms[currentRoom][0] == room ||
+            gDoorAdjacentRooms[currentRoom][1] == room) {
+            return TRUE;
+        }
+    }
+
+    if (gDoorCurrentRoom != 0 &&
+        (gDoorAdjacentRooms[gDoorCurrentRoom][0] == room ||
+         gDoorAdjacentRooms[gDoorCurrentRoom][1] == room)) {
+        return TRUE;
+    }
+
+    return FALSE;
 }
 
 /* |description|Gives the current object a hitbox and kills it if attacked, with optional loot suppression|descriptionEnd| */

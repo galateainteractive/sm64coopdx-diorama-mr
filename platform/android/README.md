@@ -1,8 +1,9 @@
-# SM64 Co-Op DX VR for Quest v0.5.10
+# SM64 Diorama MR for Quest v0.9.0
 
 Player-facing installation, controls, gestures, features, and troubleshooting
 are documented in the repository's main `README.md`. The public release is a
-single APK designed for SideQuest installation.
+signed APK embedded in the public Windows installer. Direct APK installation
+remains available for advanced testing.
 
 The standalone build has been tested on Quest 3 only. Quest 2 has not been
 tested at all, and both the standalone and PC editions remain incompletely
@@ -35,13 +36,13 @@ are rejected.
 Developers may instead copy the ROM to:
 
 ```text
-/sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files/baserom.us.z64
+/sdcard/Android/data/com.galateainteractive.sm64dioramamr/files/baserom.us.z64
 ```
 
 For example, with ADB installed and the Quest connected:
 
 ```powershell
-adb push "C:\path\to\your\baserom.us.z64" "/sdcard/Android/data/com.fulldivegames.sm64coopdxvr/files/baserom.us.z64"
+adb push "C:\path\to\your\baserom.us.z64" "/sdcard/Android/data/com.galateainteractive.sm64dioramamr/files/baserom.us.z64"
 ```
 
 Do not commit the ROM, place it in a release archive, or upload it to GitHub.

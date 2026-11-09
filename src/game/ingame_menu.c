@@ -2921,6 +2921,17 @@ static void render_pause_castle_course_stars_extended(s16 x, s16 y) {
     print_generic_string(x + 14, y + 13, str);
 }
 
+static void render_vr_pause_settings_hint(void) {
+    static const char *hint = "PRESS RIGHT STICK FOR VR SETTINGS";
+    const s16 width = (s16)get_generic_ascii_string_width(hint);
+    const s16 x = MAX(8, (SCREEN_WIDTH - width) / 2);
+
+    gSPDisplayList(gDisplayListHead++, dl_ia_text_begin);
+    gDPSetEnvColor(gDisplayListHead++, 255, 235, 96, gDialogTextAlpha);
+    print_generic_ascii_string(x, 22, hint);
+    gSPDisplayList(gDisplayListHead++, dl_ia_text_end);
+}
+
 void render_pause_castle_main_strings_extended(s16 x, s16 y) {
 
     // Main courses (0-14), Secret courses (15-24), Castle stars (25), Flags (26)
@@ -3110,6 +3121,12 @@ s16 render_pause_courses_and_castle(void) {
                 }
           }
           break;
+    }
+
+    if (vr_is_active() && !gDjuiPanelPauseCreated && !gPauseMenuHidden &&
+        (gDialogBoxState == DIALOG_STATE_VERTICAL ||
+         gDialogBoxState == DIALOG_STATE_HORIZONTAL)) {
+        render_vr_pause_settings_hint();
     }
 
     if (gDialogTextAlpha < 250) {

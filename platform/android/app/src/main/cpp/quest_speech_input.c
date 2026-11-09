@@ -68,7 +68,7 @@ bool quest_speech_recognition_is_listening(void) {
 }
 
 JNIEXPORT void JNICALL
-Java_com_fulldivegames_sm64coopdxvr_QuestNativeActivity_nativeOnSpeechRecognitionResult(
+Java_com_galateainteractive_sm64dioramamr_QuestNativeActivity_nativeOnSpeechRecognitionResult(
         JNIEnv *env, jclass clazz, jstring result) {
     (void)clazz;
     if (result == NULL) return;
@@ -83,7 +83,7 @@ Java_com_fulldivegames_sm64coopdxvr_QuestNativeActivity_nativeOnSpeechRecognitio
 }
 
 JNIEXPORT void JNICALL
-Java_com_fulldivegames_sm64coopdxvr_QuestNativeActivity_nativeOnSpeechRecognitionState(
+Java_com_galateainteractive_sm64dioramamr_QuestNativeActivity_nativeOnSpeechRecognitionState(
         JNIEnv *env, jclass clazz, jboolean listening) {
     (void)env; (void)clazz;
     pthread_mutex_lock(&sSpeechMutex);
