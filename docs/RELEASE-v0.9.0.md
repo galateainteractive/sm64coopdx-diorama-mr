@@ -61,6 +61,8 @@ Future releases signed with the same protected key can update v0.9.0 in place.
 - Permanent Galatea Android package identity with resumable legacy-data migration.
 - Cache-aware package migration with verified ROM preservation and corrected
   Quest scoped-storage permissions.
+- Android 14-safe ROM staging through `/data/local/tmp`, followed by final
+  size and SHA-256 verification inside the app directory.
 
 ## Integrity
 

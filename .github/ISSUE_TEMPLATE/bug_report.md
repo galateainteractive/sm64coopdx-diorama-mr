@@ -1,32 +1,33 @@
 ---
 name: Bug report
-about: Create a report to help us improve
-title: ''
-labels: ''
-assignees: ''
-
+about: Report a reproducible SM64 Diorama MR problem
+title: "[Bug] "
+labels: bug
+assignees: ""
 ---
 
-**Describe the bug**
-A clear and concise description of what the bug is.
+## Version and hardware
 
-**To Reproduce**
-Steps to reproduce the behavior:
-1. Go to '...'
-2. Click on '....'
-3. Scroll down to '....'
-4. See error
+- Mod version or installer SHA-256:
+- Quest model (Quest 3 / Quest 3S / other):
+- Horizon OS version:
+- Diorama MR or immersive VR:
 
-**Expected behavior**
-A clear and concise description of what you expected to happen.
+## What happened?
 
-**Screenshots**
-If applicable, add screenshots to help explain your problem.
+Describe the problem and what you expected instead.
 
-**Desktop (please complete the following information):**
- - OS: [e.g. iOS]
- - Browser [e.g. chrome, safari]
- - Version [e.g. 22]
+## Reproduction steps
 
-**Additional context**
-Add any other context about the problem here.
+1.
+2.
+3.
+
+## Additional context
+
+List the level, active mods, relevant settings, and whether the issue survives a
+full app/headset restart. Attach only the smallest relevant log excerpt.
+
+> Do not attach a ROM, extracted Nintendo assets, signing files, credentials,
+> Quest serial numbers, or logs/screenshots containing personal paths or account
+> information.

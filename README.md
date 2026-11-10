@@ -16,7 +16,7 @@
 > **Current public beta: v0.9.0 — Diorama MR Update**
 
 > [!WARNING]
-> This is an active, vibe-coded, yet fairly polished fan project. The standalone edition has been tested on **Meta Quest 3 only**. It has **not been tested on Quest 2 by me**, and neither edition has been tested across every multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues might occur. If you have any performance issues on default settings in the base game, a reset usually fixes things (You should be getting a stable 120 FPS on Quest 3, on most if not all base game maps)
+> This is an active experimental fan project. The standalone edition has been tested on **Meta Quest 3 and Quest 3S**. Quest 2 remains untested, and neither edition has been tested across every multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues may occur. If default base-game performance degrades after extended testing, restart the app or headset before reporting it.
 
 > [!WARNING]
 > Standalone co-op, Chat, and its VR keyboard are still experimental. Text or other menu elements may occasionally appear blurry or visually incorrect; restarting the app or headset usually clears these issues. Co-op can also produce minor visual bugs. Large lobbies may reduce performance, and gameplay-changing server mods can cause visual problems, broken behavior, or crashes. Disconnecting may recover the session; otherwise, fully restart the game. Controller keyboard text chat is available.
@@ -34,8 +34,7 @@ Compatible Quest standalone and PC VR clients include built-in voice chat for Pu
 
 Open **Server Settings > Voice Chat** to enable or disable voice chat, mute your microphone, adjust microphone level, or adjust other-player volume. The **Players** menu supports individual two-way mutes and shows a speaker icon beside players who are actively speaking. The on-screen keyboard's microphone button can also dictate speech into the active text field. This project's voice traffic is not sent in Regular Public Lobbies.
 
-This repository contains the standalone Android/Quest port of [sm64coopdx-VR (Physics-based)](https://github.com/fulldivegames/sm64coopdx-VR-Physics-based), derived from [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx). It runs the game natively on the headset through OpenXR and OpenGL ES while retaining the original project's multiplayer foundation, Lua/mod support where compatible, first- and third-person cameras, tracked hands, and physical VR interactions.
-There are videos on my YouTube channel: https://www.youtube.com/@fulldivegames667 that show off the mod.
+This repository is based on the [FullDiveGames standalone Quest port](https://github.com/fulldivegames/sm64coopdx-VR-Standalone-Physics-based) and [sm64coopdx-VR (Physics-based)](https://github.com/fulldivegames/sm64coopdx-VR-Physics-based), which derive from [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx). It runs the game natively on the headset through OpenXR and OpenGL ES while retaining the upstream multiplayer foundation, Lua/mod support where compatible, first- and third-person cameras, tracked hands, and physical VR interactions. Upstream VR demonstrations are available on the [FullDiveGames YouTube channel](https://www.youtube.com/@fulldivegames667).
 
 ## Download and install
 
@@ -46,14 +45,14 @@ Nintendo game assets.
 
 ### Requirements
 
-- Meta Quest 3 (Quest 2 untested by me, but should run fairly well. There are also performance options!)
+- Meta Quest 3 or Quest 3S; Quest 2 remains untested
 - Developer Mode enabled for the headset
 - A Windows PC and USB data cable
 - Your own legally obtained, unmodified **Super Mario 64 US `.z64` ROM**
 
 ### Install with the release installer
 
-1. Open this repository's [latest release](https://github.com/galateainteractive/sm64coopdx-diorama-mr/releases/latest).
+1. Open the canonical [Super Mario 64 Diorama MR v0.9.0 public release](https://github.com/galateainteractive/Diorama-MR-Mods-Releases/releases/tag/super-mario-64-v0.9.0).
 2. Download `SM64-Diorama-MR-v0.9.0-Installer.exe` under **Assets**.
 3. Connect the Quest and accept the USB debugging prompt inside the headset.
 4. Run the installer and select your own unmodified US `.z64` ROM.
@@ -391,6 +390,8 @@ The debug APK is produced under `platform/android/app/build/outputs/apk/debug/`.
 
 ## Credits and legal notice
 
+- [Galatea Interactive](https://github.com/galateainteractive) — Diorama MR integration, Quest release engineering, installer integration, and current maintenance
+- [FullDiveGames standalone Quest port](https://github.com/fulldivegames/sm64coopdx-VR-Standalone-Physics-based) and [PC VR port](https://github.com/fulldivegames/sm64coopdx-VR-Physics-based)
 - [SM64 Co-Op DX](https://github.com/coop-deluxe/sm64coopdx) and the Coop Deluxe Team
 - [sm64ex-coop](https://github.com/djoslin0/sm64ex-coop) and its contributors
 - The Super Mario 64 decompilation and PC-port contributors
@@ -398,3 +399,8 @@ The debug APK is produced under `platform/android/app/build/outputs/apk/debug/`.
 - Lua 5.3.5, included under its MIT-style license in `platform/android/third_party/lua-5.3.5/doc/readme.html`
 
 This is an unofficial fan project and is not affiliated with or endorsed by Nintendo, Meta, the SM64 Co-Op DX team, SideQuest, or Khronos. Super Mario and related names, characters, and assets belong to their respective owners. This repository does not grant permission to redistribute Nintendo ROMs or game assets.
+
+This repository is source-available but does not claim a new project-wide
+open-source license for inherited upstream code. Read [LICENSE.md](LICENSE.md),
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), and
+[SECURITY.md](SECURITY.md) before reusing code or reporting sensitive issues.

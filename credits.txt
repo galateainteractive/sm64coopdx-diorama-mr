@@ -1,3 +1,12 @@
+SM64 Diorama MR:
+    Galatea Interactive (Diorama MR integration, Quest release engineering,
+    installer integration, and current maintenance)
+
+VR Foundations:
+    FullDiveGames (standalone Quest and PC VR ports)
+    https://github.com/fulldivegames/sm64coopdx-VR-Standalone-Physics-based
+    https://github.com/fulldivegames/sm64coopdx-VR-Physics-based
+
 sm64coopdx Developers:
     Agent X
     AngelicMiracles

@@ -97,3 +97,21 @@ todo-old.txt
 tools/ido5.3_compiler/usr/lib/libc.so.1
 /.vs
 tools/audiofile/libaudiofile.a
+
+# Public repository safety
+/output/
+/tmp/
+*.apk
+*.aab
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pem
+*.key
+**/keystore.properties
+**/release-signing.properties
+**/RECOVERY-INSTRUCTIONS.txt
+.env
+.env.*
+!.env.example

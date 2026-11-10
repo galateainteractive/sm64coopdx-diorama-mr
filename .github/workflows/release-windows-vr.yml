@@ -9,7 +9,7 @@ on:
         default: dev
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   windows-vr:

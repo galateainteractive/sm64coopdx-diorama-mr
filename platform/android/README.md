@@ -5,9 +5,9 @@ are documented in the repository's main `README.md`. The public release is a
 signed APK embedded in the public Windows installer. Direct APK installation
 remains available for advanced testing.
 
-The standalone build has been tested on Quest 3 only. Quest 2 has not been
-tested at all, and both the standalone and PC editions remain incompletely
-tested across the entire game and third-party content.
+The standalone build has been tested on Quest 3 and Quest 3S. Quest 2 has not
+been tested, and both the standalone and PC editions remain incompletely tested
+across the entire game and third-party content.
 
 ## Third-party software
 
@@ -39,11 +39,17 @@ Developers may instead copy the ROM to:
 /sdcard/Android/data/com.galateainteractive.sm64dioramamr/files/baserom.us.z64
 ```
 
-For example, with ADB installed and the Quest connected:
+Android 14 may reject a direct `adb push` into `Android/data` while applying
+ownership metadata. Stage the ROM under `/data/local/tmp`, copy it into the app
+folder, and verify the final file instead:
 
 ```powershell
-adb push "C:\path\to\your\baserom.us.z64" "/sdcard/Android/data/com.galateainteractive.sm64dioramamr/files/baserom.us.z64"
+adb push "C:\path\to\your\baserom.us.z64" /data/local/tmp/baserom.us.z64
+adb shell "mkdir -p '/sdcard/Android/data/com.galateainteractive.sm64dioramamr/files' && cp '/data/local/tmp/baserom.us.z64' '/sdcard/Android/data/com.galateainteractive.sm64dioramamr/files/baserom.us.z64' && stat -c '%s' '/sdcard/Android/data/com.galateainteractive.sm64dioramamr/files/baserom.us.z64' && sha256sum '/sdcard/Android/data/com.galateainteractive.sm64dioramamr/files/baserom.us.z64' && rm -f '/data/local/tmp/baserom.us.z64'"
 ```
+
+The expected size is `8388608` bytes and the expected SHA-256 for the supported
+US ROM is `17ce077343c6133f8c9f2d6d6d9a4ab62c8cd2aa57c40aea1f490b4c8bb21d91`.
 
 Do not commit the ROM, place it in a release archive, or upload it to GitHub.
 
@@ -62,7 +68,7 @@ Do not commit the ROM, place it in a release archive, or upload it to GitHub.
 ## Experimental Diorama MR
 
 Open **Options > VR Settings > Camera Settings**, then set **Camera Mode**
-to **Diorama MR Mode**. The current level is rendered as a fixed miniature about
+to **Diorama MR Mode**. New configurations already start in this mode. The current level is rendered as a fixed miniature about
 1.5 metres ahead and 0.75 metres below the tracked head origin. Mario remains
 fully playable and does not move the viewpoint; walking around, leaning, and
 crouching move only the tracked view around the miniature.

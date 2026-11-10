@@ -205,7 +205,7 @@ TROUBLESHOOTING
 
 PROJECT PAGE
 
-https://github.com/fulldivegames/sm64coopdx-VR
+https://github.com/galateainteractive/sm64coopdx-diorama-mr
 
 This is an unofficial fan project. It is not affiliated with or endorsed by
 Nintendo, the SM64 Co-Op DX team, Meta, Virtual Desktop, or Khronos.

@@ -27,4 +27,4 @@ No PC is required after installation. The APK contains no ROM or Nintendo game a
 
 The standalone edition has been tested on **Quest 3 only**. It has **not been tested on Quest 2 at all**. It is not completely tested across every level, multiplayer condition, mod, model pack, ROM hack, or long play session.
 
-See the repository README for the complete SideQuest guide, default controls, every physical gesture, settings, performance guidance, and troubleshooting. PC VR users should use the separate [PC repository](https://github.com/fulldivegames/sm64coopdx-VR).
+See the repository README for the complete SideQuest guide, default controls, every physical gesture, settings, performance guidance, and troubleshooting. PC VR users should use the separate [PC repository](https://github.com/fulldivegames/sm64coopdx-VR-Physics-based).
