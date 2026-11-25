@@ -13,7 +13,7 @@
   Native ARM64/OpenXR VR for Meta Quest. No PC is required after installation.
 </p>
 
-> **Current public beta: v0.9.0 — Diorama MR Update**
+> **Current public beta: v0.9.1 — Branding Update**
 
 > [!WARNING]
 > This is an active experimental fan project. The standalone edition has been tested on **Meta Quest 3 and Quest 3S**. Quest 2 remains untested, and neither edition has been tested across every multiplayer situation, ROM hack, or mod combination. Occasional crashes or issues may occur. If default base-game performance degrades after extended testing, restart the app or headset before reporting it.
@@ -52,8 +52,8 @@ Nintendo game assets.
 
 ### Install with the release installer
 
-1. Open the canonical [Super Mario 64 Diorama MR v0.9.0 public release](https://github.com/galateainteractive/Diorama-MR-Mods-Releases/releases/tag/super-mario-64-v0.9.0).
-2. Download `SM64-Diorama-MR-v0.9.0-Installer.exe` under **Assets**.
+1. Open the canonical [Super Mario 64 Diorama MR v0.9.1 public release](https://github.com/galateainteractive/Diorama-MR-Mods-Releases/releases/tag/super-mario-64-v0.9.1).
+2. Download `SM64-Diorama-MR-v0.9.1-Installer.exe` under **Assets**.
 3. Connect the Quest and accept the USB debugging prompt inside the headset.
 4. Run the installer and select your own unmodified US `.z64` ROM.
 5. Select the authorized Quest and install. The installer validates the ROM,
@@ -66,7 +66,7 @@ first if you want the private ROM, save, and configuration data to remain
 available. Back up important saves before testing a new release.
 
 > [!IMPORTANT]
-> Install v0.9.0 directly over an existing installation so the private ROM,
+> Install v0.9.1 directly over an existing installation so the private ROM,
 > save, and settings remain available. Do not uninstall the app first.
 
 > [!IMPORTANT]
@@ -80,7 +80,7 @@ The standalone build loads compatible SM64 Co-Op DX mods from this easy-to-acces
 /sdcard/SM64VR/mods/
 ```
 
-1. Install or update to v0.9.0 and launch it once. If Android opens the **Allow access to manage all files** page, enable access for **SM64 Diorama MR**. This permission is used for the shared mod, DynOS, palette, and shader-cache folders.
+1. Install or update to v0.9.1 and launch it once. If Android opens the **Allow access to manage all files** page, enable access for **SM64 Diorama MR**. This permission is used for the shared mod, DynOS, palette, and shader-cache folders.
 2. Close and reopen the game once after granting access. The game creates `/sdcard/SM64VR/mods/` automatically.
 3. Download a mod compatible with SM64 Co-Op DX. The official community browser is [mods.sm64coopdx.com](https://mods.sm64coopdx.com/mods/).
 4. Extract the archive. Copy the **extracted mod folder**, not the `.zip`, into `SM64VR/mods` with SideQuest's file manager. The mod files must be directly inside their own folder rather than inside an extra duplicate folder.
@@ -99,7 +99,7 @@ The private `Android/data/com.galateainteractive.sm64dioramamr/files/mods/` loca
 
 ### Install DynOS packs
 
-Launch the game once after installing v0.9.0. The game automatically creates:
+Launch the game once after installing v0.9.1. The game automatically creates:
 
 ```text
 /sdcard/SM64VR/dynos/packs/
@@ -273,6 +273,15 @@ Painting entries use a short white comfort fade. The optional True First Person 
 - Large Lua mods, model packs, ROM hacks, and texture packs may exceed standalone memory/performance budgets or rely on desktop-only behavior.
 
 When **WiddlePets** is enabled, Server Settings adds a **Pets** button that opens the mod's own `/wpets` pet-selection menu. Pet choice, spawning, and following behavior remain controlled by WiddlePets itself.
+
+## v0.9.1 — Branding Update
+
+- Added the SM64 Diorama MR application icon shown in the Quest app library
+- Replaced the original loading/menu logo with the Diorama MR branding
+- Kept the v0.9.0 gameplay, mixed-reality behavior, package identity, signing
+  certificate, permissions, and private data paths unchanged
+- Supports an in-place update over v0.9.0 so the user's ROM, saves, and settings
+  remain in the existing private app directory
 
 ## v0.9.0 — Diorama MR Update
 
